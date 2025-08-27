@@ -4,7 +4,7 @@ import Login from './pages/Login.jsx';
 import Register from './pages/Register.jsx';
 import Alerts from './pages/Alerts.jsx';
 import AlertDetail from './pages/AlertDetail.jsx';
-import Chat from './pages/Chat.jsx';
+import ThreatHunter from './pages/ThreatHunter.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Home from './pages/Home.jsx';
 
@@ -20,7 +20,7 @@ export default function App() {
           <Link to="/">Home</Link> |{' '}
           <Link to="/dashboard">Dashboard</Link> |{' '}
           <Link to="/alerts">Alerts</Link> |{' '}
-          <Link to="/chat">Threat Hunter</Link>
+          <Link to="/hunter">Threat Hunter</Link>
         </nav>
       <Routes>
           <Route path="/" element={<Home />} />
@@ -29,7 +29,7 @@ export default function App() {
           <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
           <Route path="/alerts" element={<PrivateRoute><Alerts /></PrivateRoute>} />
           <Route path="/alerts/:id" element={<PrivateRoute><AlertDetail /></PrivateRoute>} />
-          <Route path="/chat" element={<PrivateRoute><Chat /></PrivateRoute>} />
+          <Route path="/hunter" element={<PrivateRoute><ThreatHunter /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </div>

@@ -1,8 +1,29 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './Home.css';
 
 export default function Home() {
+  const [metrics, setMetrics] = useState(null);
+
+  const loadMetrics = async () => {
+    const token = localStorage.getItem('token');
+    try {
+      const resp = await fetch('http://localhost:3000/metrics', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setMetrics(data);
+      }
+    } catch (err) {
+      console.error('Failed to load metrics', err);
+    }
+  };
+
+  useEffect(() => {
+    loadMetrics();
+  }, []);
+
   return (
     <div className="home-container">
       <section className="hero">
@@ -27,6 +48,14 @@ export default function Home() {
           <p>Stay ahead with continuous monitoring.</p>
         </div>
       </section>
+      {metrics && (
+        <section className="metrics">
+          <h2>Live Metrics</h2>
+          <p>Total Alerts: {metrics.totalAlerts}</p>
+          <p>Average Analysis Time: {metrics.avgAnalysisTime.toFixed(1)}s</p>
+          <button onClick={loadMetrics}>Refresh</button>
+        </section>
+      )}
     </div>
   );
 }

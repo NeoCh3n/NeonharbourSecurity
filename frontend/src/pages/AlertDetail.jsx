@@ -1,58 +1,58 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-
-const detailData = {
-  1: {
-    summary: 'Possible brute force attack detected',
-    severity: 'high',
-    timeline: [
-      { step: 'Initial detection', time: '2024-04-01T00:00:00Z', action: 'Alert generated', evidence: 'Multiple login failures' },
-      { step: 'IP reputation', time: '2024-04-01T00:05:00Z', action: 'Checked IP', evidence: 'Malicious IP found' }
-    ],
-    evidence: [
-      { type: 'log', content: 'Failed login from 10.0.0.1' },
-      { type: 'ip', content: 'VirusTotal score: 80' }
-    ]
-  },
-  2: {
-    summary: 'Suspicious file upload',
-    severity: 'medium',
-    timeline: [
-      { step: 'File uploaded', time: '2024-04-01T01:00:00Z', action: 'User uploaded file', evidence: 'upload.exe' }
-    ],
-    evidence: [
-      { type: 'log', content: 'upload.exe hashed to abc123' }
-    ]
-  }
-};
 
 export default function AlertDetail() {
   const { id } = useParams();
-  const data = detailData[id] || { summary: 'N/A', severity: 'low', timeline: [], evidence: [] };
+  const [alert, setAlert] = useState(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    fetch(`http://localhost:3000/alerts/${id}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(res => res.json())
+      .then(data => setAlert(data))
+      .catch(err => console.error('Failed to load alert', err));
+  }, [id]);
 
   const handleExport = () => {
     window.print();
   };
 
+  const sendFeedback = async fb => {
+    const token = localStorage.getItem('token');
+    await fetch(`http://localhost:3000/alerts/${id}/feedback`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ feedback: fb })
+    });
+    alert(`反馈已提交: ${fb}`);
+  };
+
+  if (!alert) return <div>Loading...</div>;
+
   return (
     <div>
       <h2>Alert {id} Detail</h2>
       <h3>AI Summary</h3>
-      <p>{data.summary} (Severity: {data.severity})</p>
+      <p>{alert.summary} (Severity: {alert.severity})</p>
       <h3>Timeline</h3>
       <ul>
-        {data.timeline.map((t, idx) => (
+        {alert.timeline.map((t, idx) => (
           <li key={idx}>{t.step} - {new Date(t.time).toLocaleString()} - {t.action} - {t.evidence}</li>
         ))}
       </ul>
       <h3>Evidence</h3>
       <ul>
-        {data.evidence.map((e, idx) => (
+        {alert.evidence.map((e, idx) => (
           <li key={idx}>{e.type}: {e.content}</li>
         ))}
       </ul>
-      <button onClick={()=>alert('Threat confirmed')}>确认威胁</button>
-      <button onClick={()=>alert('Marked as false positive')}>误报</button>
+      <button onClick={() => sendFeedback('confirmed')}>确认威胁</button>
+      <button onClick={() => sendFeedback('false_positive')}>误报</button>
       <button onClick={handleExport}>导出 PDF</button>
     </div>
   );

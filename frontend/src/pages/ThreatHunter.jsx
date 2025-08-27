@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 
-export default function Chat() {
+export default function ThreatHunter() {
   const [input, setInput] = useState('');
+  const [logs, setLogs] = useState('');
   const [messages, setMessages] = useState([]);
 
   const handleSubmit = async (e) => {
@@ -17,7 +18,7 @@ export default function Chat() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ question: input, logs: [] })
+        body: JSON.stringify({ question: input, logs: logs ? [logs] : [] })
       });
       const data = await resp.json();
       const evidence = Array.isArray(data.evidence) && data.evidence[0]
@@ -30,6 +31,7 @@ export default function Chat() {
       setMessages(prev => [...prev, aiMsg]);
     }
     setInput('');
+    setLogs('');
   };
 
   return (
@@ -49,6 +51,7 @@ export default function Chat() {
       </div>
       <form onSubmit={handleSubmit}>
         <input value={input} onChange={e=>setInput(e.target.value)} placeholder="Ask a question" />
+        <textarea value={logs} onChange={e=>setLogs(e.target.value)} placeholder="Optional logs" />
         <button type="submit">Send</button>
       </form>
     </div>

@@ -9,6 +9,12 @@ jest.mock('../database', () => ({
   initDatabase: jest.fn(),
 }));
 
+// Mock bcrypt to avoid real hashing/compare during tests
+jest.mock('bcryptjs', () => ({
+  compare: jest.fn().mockResolvedValue(true),
+  hash: jest.fn().mockResolvedValue('hashed-password')
+}));
+
 // Mock environment variables
 process.env.JWT_SECRET = 'test-secret';
 
@@ -54,18 +60,21 @@ describe('Server API Tests', () => {
     });
 
     it('should return empty alerts list', async () => {
-      pool.query.mockResolvedValueOnce({ rows: [] });
-      
       // First get a valid token
       const mockUser = { id: 1, email: 'test@example.com', password: '$2a$10$hashed' };
-      pool.query
-        .mockResolvedValueOnce({ rows: [mockUser] });
+      // 1) Login user lookup
+      pool.query.mockResolvedValueOnce({ rows: [mockUser] });
 
       const loginResponse = await request(app)
         .post('/auth/login')
         .send({ email: 'test@example.com', password: 'password123' });
 
       const token = loginResponse.body.token;
+
+      // 2) /auth/me lookup during auth middleware
+      pool.query.mockResolvedValueOnce({ rows: [{ id: 1, email: 'test@example.com' }] });
+      // 3) Alerts query returns empty list
+      pool.query.mockResolvedValueOnce({ rows: [] });
 
       const alertsResponse = await request(app)
         .get('/alerts')

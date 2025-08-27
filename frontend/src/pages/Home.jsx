@@ -1,22 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './Home.css';
+import { metricsApi } from '../services/api';
 
 export default function Home() {
   const [metrics, setMetrics] = useState(null);
 
   const loadMetrics = async () => {
-    const token = localStorage.getItem('token');
     try {
-      const resp = await fetch('http://localhost:3000/metrics', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        setMetrics(data);
-      }
+      const data = await metricsApi.get();
+      setMetrics(data);
     } catch (err) {
-      console.error('Failed to load metrics', err);
+      // ignore on home if unauthenticated
     }
   };
 

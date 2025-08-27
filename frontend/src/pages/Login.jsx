@@ -1,17 +1,28 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { authApi } from '../services/api';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const navigate = useNavigate();
 
-  const handleSubmit = (e) => {
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (email && password) {
-      // Simulate JWT
-      localStorage.setItem('token', 'fake-jwt-token');
-      navigate('/dashboard');
+    setError('');
+    try {
+      const resp = await authApi.login(email, password);
+      if (resp?.token) {
+        localStorage.setItem('token', resp.token);
+        const onboarded = localStorage.getItem('onboarded') === 'true';
+        navigate(onboarded ? '/dashboard' : '/onboarding');
+      } else {
+        setError('Login failed');
+      }
+    } catch (err) {
+      setError(err.message || 'Login failed');
     }
   };
 
@@ -23,6 +34,7 @@ export default function Login() {
         <input type="password" placeholder="Password" value={password} onChange={(e)=>setPassword(e.target.value)} required />
         <button type="submit">Login</button>
       </form>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
       <p>No account? <Link to="/register">Register</Link></p>
     </div>
   );

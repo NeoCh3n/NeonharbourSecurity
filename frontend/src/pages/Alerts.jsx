@@ -43,8 +43,9 @@ export default function Alerts() {
         <label>Status: </label>
         <select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
           <option value="">All</option>
-          <option value="new">New</option>
-          <option value="open">Open</option>
+          <option value="investigating">Investigating</option>
+          <option value="needs_review">Needs Review</option>
+          <option value="benign">Benign</option>
           <option value="closed">Closed</option>
         </select>
         <label> Severity: </label>

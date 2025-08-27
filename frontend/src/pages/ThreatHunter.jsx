@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { hunterApi } from '../services/api';
 
 export default function ThreatHunter() {
   const [input, setInput] = useState('');
@@ -10,17 +11,8 @@ export default function ThreatHunter() {
     if (!input) return;
     const userMsg = { from: 'user', text: input };
     setMessages(prev => [...prev, userMsg]);
-    const token = localStorage.getItem('token');
     try {
-      const resp = await fetch('http://localhost:3000/hunter/query', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ question: input, logs: logs ? [logs] : [] })
-      });
-      const data = await resp.json();
+      const data = await hunterApi.query(input, logs ? [logs] : []);
       const evidence = Array.isArray(data.evidence) && data.evidence[0]
         ? { type: 'log', content: data.evidence[0] }
         : null;

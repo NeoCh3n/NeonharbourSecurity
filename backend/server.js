@@ -117,7 +117,36 @@ app.get('/auth/me', authMiddleware, (req, res) => {
   res.json({ id: req.user.id, email: req.user.email });
 });
 
-// Alerts upload
+// Helper to process and persist alert objects
+async function processAlertsForUser(alertObjs, userId) {
+  const processed = [];
+  for (const alert of alertObjs) {
+    try {
+      const analysis = await analyzeAlert(alert);
+      const result = await pool.query(
+        `INSERT INTO alerts (source, status, summary, severity, timeline, evidence, analysis_time, raw, user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, created_at, source, status, summary, severity`,
+        [
+          alert.source || 'ingest',
+          'needs_review',
+          analysis.summary,
+          analysis.severity,
+          analysis.timeline,
+          analysis.evidence,
+          analysis.analysisTime,
+          alert,
+          userId
+        ]
+      );
+      processed.push(result.rows[0]);
+    } catch (error) {
+      console.error('Error processing alert:', error);
+    }
+  }
+  return processed;
+}
+
+// Alerts upload (CSV/JSON file or JSON body)
 app.post('/alerts/upload', authMiddleware, upload.single('file'), async (req, res) => {
   let data = [];
   try {
@@ -139,30 +168,26 @@ app.post('/alerts/upload', authMiddleware, upload.single('file'), async (req, re
     return res.status(400).json({ error: 'Invalid data' });
   }
 
-  const processed = [];
-  for (const alert of data) {
-    try {
-      const analysis = await analyzeAlert(alert);
-      const result = await pool.query(
-        `INSERT INTO alerts (source, status, summary, severity, timeline, evidence, analysis_time, raw, user_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, created_at, source, status, summary, severity`,
-        [
-          alert.source || 'upload',
-          'new',
-          analysis.summary,
-          analysis.severity,
-          analysis.timeline,
-          analysis.evidence,
-          analysis.analysisTime,
-          alert,
-          req.user.id
-        ]
-      );
-      processed.push(result.rows[0]);
-    } catch (error) {
-      console.error('Error processing alert:', error);
+  const processed = await processAlertsForUser(data, req.user.id);
+  res.json({ alerts: processed });
+});
+
+// Alerts ingest (JSON only) per MVP API contract
+app.post('/alerts/ingest', authMiddleware, async (req, res) => {
+  let data = [];
+  try {
+    if (Array.isArray(req.body)) {
+      data = req.body;
+    } else if (Array.isArray(req.body.alerts)) {
+      data = req.body.alerts;
+    } else if (req.body && typeof req.body === 'object') {
+      data = [req.body];
     }
+  } catch (err) {
+    return res.status(400).json({ error: 'Invalid data' });
   }
+  if (!data.length) return res.status(400).json({ error: 'No alerts provided' });
+  const processed = await processAlertsForUser(data, req.user.id);
   res.json({ alerts: processed });
 });
 
@@ -190,6 +215,22 @@ app.get('/alerts/:id', authMiddleware, async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error fetching alert:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Investigation details endpoint per MVP API
+app.get('/alerts/:id/investigation', authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const result = await pool.query(
+      'SELECT summary, timeline, evidence FROM alerts WHERE id = $1 AND user_id = $2',
+      [id, req.user.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching investigation:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -230,8 +271,19 @@ app.get('/metrics', authMiddleware, async (req, res) => {
       'SELECT severity, COUNT(*) as count FROM alerts WHERE user_id = $1 GROUP BY severity',
       [req.user.id]
     );
+    const statusResult = await pool.query(
+      'SELECT status, COUNT(*) as count FROM alerts WHERE user_id = $1 GROUP BY status',
+      [req.user.id]
+    );
     const timeResult = await pool.query(
       'SELECT AVG(analysis_time) as avg_time FROM alerts WHERE user_id = $1 AND analysis_time IS NOT NULL',
+      [req.user.id]
+    );
+    const feedbackResult = await pool.query(
+      `SELECT 
+         SUM(CASE WHEN feedback = 'accurate' THEN 1 ELSE 0 END) as accurate,
+         SUM(CASE WHEN feedback IS NOT NULL THEN 1 ELSE 0 END) as total_feedback
+       FROM alerts WHERE user_id = $1`,
       [req.user.id]
     );
     
@@ -239,10 +291,20 @@ app.get('/metrics', authMiddleware, async (req, res) => {
     severityResult.rows.forEach(row => {
       severityCounts[row.severity] = parseInt(row.count);
     });
+    const statusCounts = {};
+    statusResult.rows.forEach(row => {
+      statusCounts[row.status] = parseInt(row.count);
+    });
+    const accurate = parseInt(feedbackResult.rows[0].accurate || 0);
+    const totalFeedback = parseInt(feedbackResult.rows[0].total_feedback || 0);
+    const feedbackScore = totalFeedback > 0 ? Math.round((accurate / totalFeedback) * 100) : 0;
     
     res.json({
       totalAlerts: parseInt(totalResult.rows[0].total),
       severityCounts,
+      statusCounts,
+      investigatedCount: parseInt(totalResult.rows[0].total),
+      feedbackScore,
       avgAnalysisTime: timeResult.rows[0].avg_time ? parseFloat(timeResult.rows[0].avg_time) : 0
     });
   } catch (error) {
@@ -261,7 +323,7 @@ const port = process.env.PORT || 3000;
 async function startServer() {
   try {
     await initDatabase();
-    app.listen(port, () => {
+    return app.listen(port, () => {
       console.log(`Backend listening on port ${port}`);
     });
   } catch (error) {
@@ -270,5 +332,8 @@ async function startServer() {
   }
 }
 
-startServer();
-
+// Export app for testing; only start server if run directly
+module.exports = app;
+if (require.main === module) {
+  startServer();
+}

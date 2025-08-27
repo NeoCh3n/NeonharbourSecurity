@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart, BarElement, ArcElement, CategoryScale, LinearScale } from 'chart.js';
+import { alertsApi, metricsApi } from '../services/api';
 
 Chart.register(BarElement, ArcElement, CategoryScale, LinearScale);
 export default function Dashboard() {
@@ -8,14 +9,10 @@ export default function Dashboard() {
   const [metrics, setMetrics] = useState(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const headers = { Authorization: `Bearer ${token}` };
-    fetch('http://localhost:3000/alerts', { headers })
-      .then(res => res.json())
+    alertsApi.list()
       .then(data => setAlerts(data.alerts || []))
       .catch(err => console.error('Failed to load alerts', err));
-    fetch('http://localhost:3000/metrics', { headers })
-      .then(res => res.json())
+    metricsApi.get()
       .then(data => setMetrics(data))
       .catch(err => console.error('Failed to load metrics', err));
   }, []);
@@ -38,7 +35,15 @@ export default function Dashboard() {
     datasets: [{ data: Object.values(severityCounts), backgroundColor: ['#4caf50', '#ff9800', '#f44336'] }]
   };
 
+  const statusCounts = metrics?.statusCounts || {};
+  const statusPieData = {
+    labels: Object.keys(statusCounts),
+    datasets: [{ data: Object.values(statusCounts), backgroundColor: ['#90caf9', '#a5d6a7', '#ffe082', '#ef9a9a'] }]
+  };
+
   const avgInvestigationTime = metrics?.avgAnalysisTime ? (metrics.avgAnalysisTime / 60).toFixed(1) : 0;
+  const feedbackScore = metrics?.feedbackScore ?? 0;
+  const investigatedCount = metrics?.investigatedCount ?? 0;
 
   return (
     <div>
@@ -49,9 +54,20 @@ export default function Dashboard() {
       <div style={{ width: '400px' }}>
         <Pie data={pieData} />
       </div>
+      <div style={{ width: '400px' }}>
+        <Pie data={statusPieData} />
+      </div>
       <div>
         <h3>Average Analysis Time</h3>
         <p>{avgInvestigationTime} minutes</p>
+      </div>
+      <div>
+        <h3>Alerts Investigated</h3>
+        <p>{investigatedCount}</p>
+      </div>
+      <div>
+        <h3>User Feedback Score</h3>
+        <p>{feedbackScore}% Accurate</p>
       </div>
     </div>
   );

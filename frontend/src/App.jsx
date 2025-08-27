@@ -7,6 +7,7 @@ import AlertDetail from './pages/AlertDetail.jsx';
 import ThreatHunter from './pages/ThreatHunter.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Home from './pages/Home.jsx';
+import Onboarding from './pages/Onboarding.jsx';
 
 function PrivateRoute({ children }) {
   const token = localStorage.getItem('token');
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/onboarding" element={<PrivateRoute><Onboarding /></PrivateRoute>} />
           <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
           <Route path="/alerts" element={<PrivateRoute><Alerts /></PrivateRoute>} />
           <Route path="/alerts/:id" element={<PrivateRoute><AlertDetail /></PrivateRoute>} />

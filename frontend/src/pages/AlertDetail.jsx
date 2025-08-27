@@ -1,16 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { alertsApi } from '../services/api';
 
 export default function AlertDetail() {
   const { id } = useParams();
   const [alert, setAlert] = useState(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    fetch(`http://localhost:3000/alerts/${id}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(res => res.json())
+    alertsApi.get(id)
       .then(data => setAlert(data))
       .catch(err => console.error('Failed to load alert', err));
   }, [id]);
@@ -20,16 +17,8 @@ export default function AlertDetail() {
   };
 
   const sendFeedback = async fb => {
-    const token = localStorage.getItem('token');
-    await fetch(`http://localhost:3000/alerts/${id}/feedback`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify({ feedback: fb })
-    });
-    alert(`反馈已提交: ${fb}`);
+    await alertsApi.feedback(id, fb);
+    alert(`Feedback submitted: ${fb}`);
   };
 
   if (!alert) return <div>Loading...</div>;
@@ -47,12 +36,23 @@ export default function AlertDetail() {
       </ul>
       <h3>Evidence</h3>
       <ul>
-        {alert.evidence.map((e, idx) => (
-          <li key={idx}>{e.type}: {e.content}</li>
-        ))}
+        {alert.evidence.map((e, idx) => {
+          const label = e.type || 'evidence';
+          let detail = '';
+          if (e.type === 'virustotal') {
+            const intel = e.data || {};
+            const malicious = intel?.malicious ?? intel?.data?.attributes?.last_analysis_stats?.malicious;
+            detail = `${e.indicator || ''} - malicious: ${malicious ?? 'n/a'}`;
+          } else if (typeof e.content === 'string') {
+            detail = e.content;
+          } else {
+            detail = JSON.stringify(e);
+          }
+          return <li key={idx}>{label}: {detail}</li>;
+        })}
       </ul>
-      <button onClick={() => sendFeedback('confirmed')}>确认威胁</button>
-      <button onClick={() => sendFeedback('false_positive')}>误报</button>
+      <button onClick={() => sendFeedback('accurate')}>✔️ Accurate Investigation</button>
+      <button onClick={() => sendFeedback('inaccurate')}>❌ Inaccurate Investigation</button>
       <button onClick={handleExport}>导出 PDF</button>
     </div>
   );

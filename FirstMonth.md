@@ -1,87 +1,111 @@
-🗂️ MVP 开发 Backlog（第 1 月）
-
-📌 前端 (Frontend)
-	1.	用户认证界面
-	•	登录 / 注册页面（邮箱 + 密码）
-	•	Session 管理（JWT）
-✅ 验收：用户可注册账号并登录系统
-	2.	告警工作台 – 列表视图
-	•	表格字段：ID / 时间 / 来源 / 状态 / 严重级别
-	•	筛选：按状态、严重级别过滤
-✅ 验收：能看到上传或来自 Splunk 的告警
-	3.	告警详情页
-	•	显示 AI 总结（结论 + 严重性）
-	•	显示时间轴（步骤/时间/动作/证据）
-	•	显示证据详情（日志片段 / IP 情报）
-	•	操作按钮：[确认威胁] [误报] [导出 PDF]
-✅ 验收：用户点开告警可完整查看调查摘要与证据
-	4.	Threat Hunter 对话界面
-	•	输入框 + 提交按钮
-	•	AI 回复（自然语言）
-	•	附加证据卡片（日志、情报）
-✅ 验收：用户提问“是否有恶意 IP 连接？”→ 得到答案
-	5.	仪表盘
-	•	图表：本月处理告警数量（柱状图）、严重级别分布（饼图）、平均调查耗时（数值卡片）
-✅ 验收：页面展示实时更新的 3 项指标
-
-⸻
-
-📌 后端 (Backend)
-	1.	认证 API
-	•	POST /auth/register
-	•	POST /auth/login
-	•	GET /auth/me
-✅ 验收：用户可注册登录，返回 JWT
-	2.	告警管理 API
-	•	POST /alerts/upload 上传 JSON/CSV 告警
-	•	GET /alerts 列表
-	•	GET /alerts/{id} 详情（AI 总结、时间轴、证据）
-	•	POST /alerts/{id}/feedback 用户标注结果
-✅ 验收：能成功上传并调用 AI 分析
-	3.	Threat Hunter API
-	•	POST /hunter/query
-	•	输入：自然语言问题
-	•	输出：AI 回答 + 证据数据
-✅ 验收：调用接口能返回回答
-	4.	仪表盘 API
-	•	GET /metrics 返回 KPI（数量、分布、耗时）
-✅ 验收：前端图表可正确展示
-
-⸻
-
-📌 AI 模块 (AI Engine)
-	1.	告警分析 Prompt
-	•	输入：告警 JSON
-	•	输出：一句话总结 + 严重级别
-✅ 验收：返回非空总结
-	2.	调查时间轴生成
-	•	输出：分步骤时间轴 + 证据引用
-✅ 验收：详情页可展示至少 2-3 条步骤
-	3.	Threat Hunter Prompt
-	•	输入：自然语言问题 + 历史日志
-	•	输出：自然语言回答 + 证据引用
-✅ 验收：能返回回答，至少含 1 条证据
-	4.	外部情报集成
-	•	VirusTotal API（IP/Hash 查询）
-✅ 验收：结果能在时间轴 / 证据详情展示
-
-⸻
-
-📌 测试 & 部署
-	1.	单元测试
-	•	后端 API 测试
-	•	AI 输出检查（非空）
-	2.	端到端测试
-	•	上传 CSV → 触发 AI → 查看详情 → 导出报告
-	3.	部署
-	•	Docker Compose：后端 + 前端 + Postgres
-✅ 验收：docker-compose up 可启动平台
-
-⸻
-
-✅ 第 1 月 交付物
-	•	可运行的 MVP 系统：
-	•	登录 → 上传告警 → 查看 AI 总结 / 时间轴 / 证据
-	•	Threat Hunter 问答界面可用
-	•	仪表盘显示指标
-	•	提供 Docker Compose 文件 & 安装文档
+🗂️ MVP Development Backlog (Month 1) - "Agentic AI SOC Analyst"
+Product Goal: To develop a functional MVP of an "Agentic AI SOC Analyst" that can autonomously investigate security alerts, provide a clear and transparent summary of its findings, and learn from user feedback. The MVP should focus on demonstrating the core value proposition of reducing alert investigation time and increasing analyst efficiency.
+📌 Frontend (Frontend)
+User Authentication & Onboarding:
+Tasks:
+Login/Register page (email + password).
+Session management (JWT).
+A simple onboarding flow that explains the "Not a black box" principle and how the AI investigates alerts.
+✅ Acceptance Criteria:
+Users can create an account and log in.
+New users are presented with a brief, one-time explanation of the AI's process.
+Alert Workbench - List View:
+Tasks:
+Table fields: Alert ID, Timestamp, Source, AI-Assigned Status (e.g., "Investigating," "Needs Review," "Benign"), AI-Assigned Severity.
+Filtering by AI-Assigned Status and Severity.
+✅ Acceptance Criteria:
+Users can see a list of ingested alerts with their current AI-determined status and severity.
+Alert Detail Page - "The Investigation":
+Tasks:
+AI Investigation Summary: A clear, concise summary of the AI's findings and recommended next steps.
+Investigation Timeline: A step-by-step log of the AI's actions, including timestamps, the questions the AI asked, the tools it used (e.g., "VirusTotal API call"), and the evidence it found. This directly addresses the "Not a black box" principle.
+Evidence Viewer: A section to display raw data snippets (log entries, API responses) that the AI used in its investigation.
+User Feedback Buttons: Prominent "[✔️ Accurate Investigation]" and "[❌ Inaccurate Investigation]" buttons.
+✅ Acceptance Criteria:
+Users can click on an alert and see a detailed breakdown of the AI's investigation process.
+Users can provide feedback on the quality of the AI's investigation.
+Threat Hunter - Conversational Interface:
+Tasks:
+Input field for natural language questions.
+Display of the AI's natural language response.
+Display of supporting evidence (log snippets, etc.) alongside the response.
+✅ Acceptance Criteria:
+Users can ask a question like "Have there been any connections from known malicious IPs in the last 24 hours?" and receive a clear answer with supporting data.
+Dashboard:
+Tasks:
+Key Metrics: "Alerts Investigated," "Average Investigation Time," "User Feedback Score" (percentage of "Accurate Investigation" clicks).
+Charts: "Alerts by Severity," "Alerts by Status."
+✅ Acceptance Criteria:
+The dashboard displays key performance indicators that reflect the AI's activity and effectiveness.
+📌 Backend (Backend)
+Authentication & Alert Management APIs:
+Tasks:
+POST /auth/register, POST /auth/login, GET /auth/me.
+POST /alerts/ingest (from various sources, starting with a generic JSON format).
+GET /alerts, GET /alerts/{id}.
+POST /alerts/{id}/feedback.
+✅ Acceptance Criteria:
+The frontend can authenticate users and manage alerts.
+The system can ingest alerts from an external source.
+Investigation API:
+Tasks:
+GET /alerts/{id}/investigation: This endpoint will return the detailed investigation timeline and evidence generated by the AI.
+✅ Acceptance Criteria:
+The frontend can retrieve and display the step-by-step investigation process.
+Threat Hunter API:
+Tasks:
+POST /hunter/query: Takes a natural language question and returns an AI-generated answer with supporting evidence.
+✅ Acceptance Criteria:
+The Threat Hunter interface is fully functional.
+Metrics API:
+Tasks:
+GET /metrics: Returns the data needed for the dashboard.
+✅ Acceptance Criteria:
+The dashboard can display up-to-date metrics.
+🤖 AI Module (AI Engine)
+Investigation Plan Generation:
+Tasks:
+Develop a prompt that takes an alert as input and outputs a structured investigation plan (e.g., a JSON object with a series of steps, like "1. Check IP reputation," "2. Look for related activity on other devices").
+✅ Acceptance Criteria:
+For any given alert, the AI can generate a logical, multi-step investigation plan.
+Investigation Execution & Timeline Generation:
+Tasks:
+Create a system that "executes" the investigation plan, calling external APIs (like VirusTotal) as needed.
+As the investigation proceeds, generate a detailed timeline of actions and findings.
+✅ Acceptance Criteria:
+The AI can execute its own investigation plan and produce a detailed timeline.
+Threat Hunter Prompt:
+Tasks:
+Design a prompt that can understand and answer natural language questions about the ingested security data.
+✅ Acceptance Criteria:
+The Threat Hunter can provide accurate answers to simple questions about the data.
+External Tool Integration:
+Tasks:
+Integrate with the VirusTotal API for IP and hash lookups.
+✅ Acceptance Criteria:
+The AI can use VirusTotal data in its investigations and threat hunting.
+🧪 Testing & Deployment
+Unit & Integration Testing:
+Tasks:
+Write unit tests for all backend API endpoints.
+Write integration tests to ensure the AI module correctly interacts with external APIs.
+✅ Acceptance Criteria:
+All major backend components are covered by automated tests.
+End-to-End Testing:
+Tasks:
+Test the full user flow: ingest an alert -> AI investigates -> user reviews the investigation -> user provides feedback.
+✅ Acceptance Criteria:
+The core user journey is functional and bug-free.
+Deployment:
+Tasks:
+Use Docker Compose to containerize the frontend, backend, and database for easy local setup and future deployment.
+✅ Acceptance Criteria:
+The entire platform can be started with a single docker-compose up command.
+✅ Month 1 Deliverables
+A functional MVP that allows users to:
+Ingest security alerts.
+See a detailed, step-by-step AI-powered investigation for each alert.
+Provide feedback on the AI's performance.
+Use a conversational interface to ask questions about their security data.
+A clear demonstration of the core value proposition: transparent, automated security alert investigation.
+A solid foundation for future development, including a more advanced AI learning system and more integrations.

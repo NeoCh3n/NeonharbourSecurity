@@ -4,8 +4,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const { parse: csvParse } = require('csv-parse/sync');
-const axios = require('axios');
 const path = require('path');
+const { analyzeAlert, hunterQuery } = require('./ai');
 
 const app = express();
 app.use(cors());
@@ -38,53 +38,6 @@ function authMiddleware(req, res, next) {
   } catch (err) {
     return res.status(401).json({ error: 'Invalid token' });
   }
-}
-
-async function callOpenAI(messages) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  try {
-    const resp = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      { model: 'gpt-4o-mini', messages },
-      { headers: { Authorization: `Bearer ${apiKey}` } }
-    );
-    return resp.data.choices[0].message.content.trim();
-  } catch (err) {
-    return null;
-  }
-}
-
-async function analyzeAlert(alert) {
-  const start = Date.now();
-  let summary = `Summary for alert`;
-  let severity = 'medium';
-  const timeline = [
-    { step: 'Alert received', time: new Date().toISOString(), action: 'Record', evidence: 'raw' }
-  ];
-  let evidence = [alert];
-
-  const aiResponse = await callOpenAI([
-    { role: 'system', content: 'You analyze security alerts.' },
-    { role: 'user', content: `Analyze alert: ${JSON.stringify(alert)}` }
-  ]);
-  if (aiResponse) {
-    summary = aiResponse;
-  }
-
-  const end = Date.now();
-  return { summary, severity, timeline, evidence, analysisTime: end - start };
-}
-
-async function hunterQuery(question) {
-  const aiResponse = await callOpenAI([
-    { role: 'system', content: 'You are a SOC threat hunter.' },
-    { role: 'user', content: question }
-  ]);
-  if (aiResponse) {
-    return { answer: aiResponse, evidence: [] };
-  }
-  return { answer: `No AI available. Placeholder answer for: ${question}`, evidence: [] };
 }
 
 // Auth routes
@@ -186,9 +139,9 @@ app.post('/alerts/:id/feedback', authMiddleware, (req, res) => {
 
 // Threat hunter
 app.post('/hunter/query', authMiddleware, async (req, res) => {
-  const { question } = req.body;
+  const { question, logs = [] } = req.body;
   if (!question) return res.status(400).json({ error: 'Missing question' });
-  const result = await hunterQuery(question);
+  const result = await hunterQuery(question, logs);
   res.json(result);
 });
 

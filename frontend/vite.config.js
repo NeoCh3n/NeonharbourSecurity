@@ -6,6 +6,11 @@ export default defineConfig(({ mode }) => {
   
   return {
     plugins: [react()],
+    base: '/',
+    build: {
+      outDir: 'dist',
+      assetsDir: 'assets'
+    },
     server: {
       port: 3001,
       proxy: {

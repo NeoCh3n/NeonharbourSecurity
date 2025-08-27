@@ -5,19 +5,50 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const { parse: csvParse } = require('csv-parse/sync');
 const path = require('path');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const { analyzeAlert, hunterQuery } = require('./ai');
+const { pool, initDatabase } = require('./database');
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+    },
+  },
+}));
+
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://yourdomain.com'] 
+    : ['http://localhost:3001', 'http://localhost:3000'],
+  credentials: true
+}));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.'
+});
+app.use(limiter);
+
+// More aggressive rate limiting for auth endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5, // limit to 5 attempts per window
+  message: 'Too many authentication attempts, please try again later.'
+});
+app.use('/auth/', authLimiter);
+
+app.use(express.json({ limit: '10mb' }));
 
 const upload = multer();
-
-// In-memory storage
-const users = [];
-const alerts = [];
-let nextUserId = 1;
-let nextAlertId = 1;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 
@@ -25,15 +56,15 @@ function generateToken(user) {
   return jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
 }
 
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth) return res.status(401).json({ error: 'No token' });
   const token = auth.split(' ')[1];
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    const user = users.find((u) => u.id === payload.id);
-    if (!user) return res.status(401).json({ error: 'Invalid token' });
-    req.user = user;
+    const result = await pool.query('SELECT id, email FROM users WHERE id = $1', [payload.id]);
+    if (result.rows.length === 0) return res.status(401).json({ error: 'Invalid token' });
+    req.user = result.rows[0];
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid token' });
@@ -44,22 +75,42 @@ function authMiddleware(req, res, next) {
 app.post('/auth/register', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Missing email or password' });
-  if (users.find((u) => u.email === email)) return res.status(400).json({ error: 'Email exists' });
-  const hashed = await bcrypt.hash(password, 10);
-  const user = { id: nextUserId++, email, password: hashed };
-  users.push(user);
-  const token = generateToken(user);
-  res.json({ token });
+  
+  try {
+    const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    if (existingUser.rows.length > 0) return res.status(400).json({ error: 'Email exists' });
+    
+    const hashed = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      'INSERT INTO users (email, password) VALUES ($1, $2) RETURNING id, email',
+      [email, hashed]
+    );
+    const user = result.rows[0];
+    const token = generateToken(user);
+    res.json({ token });
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 app.post('/auth/login', async (req, res) => {
   const { email, password } = req.body;
-  const user = users.find((u) => u.email === email);
-  if (!user) return res.status(400).json({ error: 'Invalid credentials' });
-  const match = await bcrypt.compare(password, user.password);
-  if (!match) return res.status(400).json({ error: 'Invalid credentials' });
-  const token = generateToken(user);
-  res.json({ token });
+  
+  try {
+    const result = await pool.query('SELECT id, email, password FROM users WHERE email = $1', [email]);
+    if (result.rows.length === 0) return res.status(400).json({ error: 'Invalid credentials' });
+    
+    const user = result.rows[0];
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(400).json({ error: 'Invalid credentials' });
+    
+    const token = generateToken(user);
+    res.json({ token });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 app.get('/auth/me', authMiddleware, (req, res) => {
@@ -90,51 +141,74 @@ app.post('/alerts/upload', authMiddleware, upload.single('file'), async (req, re
 
   const processed = [];
   for (const alert of data) {
-    const analysis = await analyzeAlert(alert);
-    const newAlert = {
-      id: nextAlertId++,
-      createdAt: new Date().toISOString(),
-      source: alert.source || 'upload',
-      status: 'new',
-      summary: analysis.summary,
-      severity: analysis.severity,
-      timeline: analysis.timeline,
-      evidence: analysis.evidence,
-      analysisTime: analysis.analysisTime,
-      raw: alert,
-      feedback: null
-    };
-    alerts.push(newAlert);
-    processed.push(newAlert);
+    try {
+      const analysis = await analyzeAlert(alert);
+      const result = await pool.query(
+        `INSERT INTO alerts (source, status, summary, severity, timeline, evidence, analysis_time, raw, user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, created_at, source, status, summary, severity`,
+        [
+          alert.source || 'upload',
+          'new',
+          analysis.summary,
+          analysis.severity,
+          analysis.timeline,
+          analysis.evidence,
+          analysis.analysisTime,
+          alert,
+          req.user.id
+        ]
+      );
+      processed.push(result.rows[0]);
+    } catch (error) {
+      console.error('Error processing alert:', error);
+    }
   }
   res.json({ alerts: processed });
 });
 
-app.get('/alerts', authMiddleware, (req, res) => {
-  const list = alerts.map((a) => ({
-    id: a.id,
-    createdAt: a.createdAt,
-    source: a.source,
-    status: a.status,
-    severity: a.severity
-  }));
-  res.json({ alerts: list });
+app.get('/alerts', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, created_at as "createdAt", source, status, severity FROM alerts WHERE user_id = $1 ORDER BY created_at DESC',
+      [req.user.id]
+    );
+    res.json({ alerts: result.rows });
+  } catch (error) {
+    console.error('Error fetching alerts:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-app.get('/alerts/:id', authMiddleware, (req, res) => {
+app.get('/alerts/:id', authMiddleware, async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const alert = alerts.find((a) => a.id === id);
-  if (!alert) return res.status(404).json({ error: 'Not found' });
-  res.json(alert);
+  try {
+    const result = await pool.query(
+      'SELECT * FROM alerts WHERE id = $1 AND user_id = $2',
+      [id, req.user.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching alert:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-app.post('/alerts/:id/feedback', authMiddleware, (req, res) => {
+app.post('/alerts/:id/feedback', authMiddleware, async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const alert = alerts.find((a) => a.id === id);
-  if (!alert) return res.status(404).json({ error: 'Not found' });
   const { feedback } = req.body;
-  alert.feedback = feedback;
-  res.json({ success: true });
+  
+  try {
+    const result = await pool.query(
+      'UPDATE alerts SET feedback = $1 WHERE id = $2 AND user_id = $3 RETURNING id',
+      [feedback, id, req.user.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating feedback:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Threat hunter
@@ -146,18 +220,55 @@ app.post('/hunter/query', authMiddleware, async (req, res) => {
 });
 
 // Metrics
-app.get('/metrics', authMiddleware, (req, res) => {
-  const total = alerts.length;
-  const severityCounts = alerts.reduce((acc, a) => {
-    acc[a.severity] = (acc[a.severity] || 0) + 1;
-    return acc;
-  }, {});
-  const avgTime = total ? alerts.reduce((sum, a) => sum + (a.analysisTime || 0), 0) / total : 0;
-  res.json({ totalAlerts: total, severityCounts, avgAnalysisTime: avgTime });
+app.get('/metrics', authMiddleware, async (req, res) => {
+  try {
+    const totalResult = await pool.query(
+      'SELECT COUNT(*) as total FROM alerts WHERE user_id = $1',
+      [req.user.id]
+    );
+    const severityResult = await pool.query(
+      'SELECT severity, COUNT(*) as count FROM alerts WHERE user_id = $1 GROUP BY severity',
+      [req.user.id]
+    );
+    const timeResult = await pool.query(
+      'SELECT AVG(analysis_time) as avg_time FROM alerts WHERE user_id = $1 AND analysis_time IS NOT NULL',
+      [req.user.id]
+    );
+    
+    const severityCounts = {};
+    severityResult.rows.forEach(row => {
+      severityCounts[row.severity] = parseInt(row.count);
+    });
+    
+    res.json({
+      totalAlerts: parseInt(totalResult.rows[0].total),
+      severityCounts,
+      avgAnalysisTime: timeResult.rows[0].avg_time ? parseFloat(timeResult.rows[0].avg_time) : 0
+    });
+  } catch (error) {
+    console.error('Error fetching metrics:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`Backend listening on port ${port}`);
-});
+
+async function startServer() {
+  try {
+    await initDatabase();
+    app.listen(port, () => {
+      console.log(`Backend listening on port ${port}`);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+startServer();
 

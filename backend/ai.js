@@ -2,16 +2,29 @@ const axios = require('axios');
 
 async function callModel(messages) {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    console.error('OpenAI API key not configured');
+    throw new Error('AI service not configured');
+  }
+  
   try {
     const resp = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
-      { model: 'openai/gpt-4o-mini', messages },
-      { headers: { Authorization: `Bearer ${apiKey}` } }
+      { 
+        model: 'openai/gpt-4o-mini', 
+        messages,
+        temperature: 0.1,
+        max_tokens: 1000
+      },
+      { 
+        headers: { Authorization: `Bearer ${apiKey}` },
+        timeout: 30000
+      }
     );
     return resp.data.choices[0].message.content.trim();
   } catch (err) {
-    return null;
+    console.error('OpenAI API call failed:', err.message);
+    throw new Error(`AI service unavailable: ${err.message}`);
   }
 }
 
@@ -24,17 +37,26 @@ function extractIndicators(obj) {
 
 async function queryVirusTotal(indicator) {
   const apiKey = process.env.VIRUSTOTAL_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    console.warn('VirusTotal API key not configured');
+    return null;
+  }
+  
   const isIP = /^\d+\.\d+\.\d+\.\d+$/.test(indicator);
   const url = isIP
     ? `https://www.virustotal.com/api/v3/ip_addresses/${indicator}`
     : `https://www.virustotal.com/api/v3/files/${indicator}`;
+  
   try {
-    const resp = await axios.get(url, { headers: { 'x-apikey': apiKey } });
+    const resp = await axios.get(url, { 
+      headers: { 'x-apikey': apiKey },
+      timeout: 10000
+    });
     const data = resp.data.data;
     const stats = data?.attributes?.last_analysis_stats || {};
     return { indicator, malicious: stats.malicious || 0, data };
   } catch (err) {
+    console.warn(`VirusTotal query failed for ${indicator}:`, err.message);
     return null;
   }
 }
@@ -46,40 +68,68 @@ async function analyzeAlert(alert) {
   let timeline = [];
   let evidence = [{ type: 'alert', content: alert }];
 
-  const aiResp = await callModel([
-    { role: 'system', content: 'You analyze security alerts and respond in JSON with keys summary, severity, and timeline (array of steps with step,time,action,evidence).' },
-    { role: 'user', content: JSON.stringify(alert) }
-  ]);
-
-  if (aiResp) {
-    try {
-      const parsed = JSON.parse(aiResp);
-      summary = parsed.summary || summary;
-      severity = parsed.severity || severity;
-      if (Array.isArray(parsed.timeline) && parsed.timeline.length) {
-        timeline = parsed.timeline;
+  try {
+    const aiResp = await callModel([
+      { 
+        role: 'system', 
+        content: 'You are a security analyst. Analyze security alerts and respond with valid JSON containing: summary (string), severity (low/medium/high), timeline (array of objects with step, time, action, evidence). Ensure valid JSON format.' 
+      },
+      { 
+        role: 'user', 
+        content: `Analyze this security alert: ${JSON.stringify(alert, null, 2)}` 
       }
-    } catch (e) {
-      summary = aiResp;
+    ]);
+
+    if (aiResp) {
+      try {
+        // Clean up AI response to ensure valid JSON
+        const cleanedResponse = aiResp.replace(/```json\n?|```/g, '').trim();
+        const parsed = JSON.parse(cleanedResponse);
+        summary = parsed.summary || summary;
+        severity = parsed.severity || severity;
+        if (Array.isArray(parsed.timeline) && parsed.timeline.length) {
+          timeline = parsed.timeline.map(item => ({
+            step: item.step || 'Unknown step',
+            time: item.time || new Date().toISOString(),
+            action: item.action || 'Unknown action',
+            evidence: item.evidence || 'No evidence'
+          }));
+        }
+      } catch (e) {
+        console.warn('Failed to parse AI response as JSON, using raw response:', e.message);
+        summary = aiResp;
+      }
     }
+  } catch (error) {
+    console.error('AI analysis failed:', error.message);
+    summary = `Analysis failed: ${error.message}`;
   }
 
   if (timeline.length === 0) {
-    timeline.push({ step: 'Alert received', time: new Date().toISOString(), action: 'Record', evidence: 'raw alert' });
+    timeline.push({ 
+      step: 'Alert received', 
+      time: new Date().toISOString(), 
+      action: 'Record', 
+      evidence: 'raw alert' 
+    });
   }
 
-  const indicators = extractIndicators(alert);
-  for (const ind of indicators) {
-    const intel = await queryVirusTotal(ind);
-    if (intel) {
-      timeline.push({
-        step: 'Threat intel lookup',
-        time: new Date().toISOString(),
-        action: 'VirusTotal query',
-        evidence: `${ind} malicious:${intel.malicious}`
-      });
-      evidence.push({ type: 'virustotal', indicator: ind, data: intel });
+  try {
+    const indicators = extractIndicators(alert);
+    for (const ind of indicators.slice(0, 5)) { // Limit to 5 indicators to avoid rate limiting
+      const intel = await queryVirusTotal(ind);
+      if (intel) {
+        timeline.push({
+          step: 'Threat intel lookup',
+          time: new Date().toISOString(),
+          action: 'VirusTotal query',
+          evidence: `${ind} - ${intel.malicious} malicious detection(s)`
+        });
+        evidence.push({ type: 'virustotal', indicator: ind, data: intel });
+      }
     }
+  } catch (error) {
+    console.error('Threat intelligence processing failed:', error.message);
   }
 
   if (timeline.length < 2) {
@@ -87,7 +137,7 @@ async function analyzeAlert(alert) {
       step: 'Analysis complete',
       time: new Date().toISOString(),
       action: 'Finalized',
-      evidence: 'No additional indicators'
+      evidence: 'Basic analysis performed'
     });
   }
 
@@ -97,26 +147,43 @@ async function analyzeAlert(alert) {
 
 async function hunterQuery(question, logs = []) {
   const logText = logs.join('\n');
-  const aiResp = await callModel([
-    { role: 'system', content: 'You are a SOC threat hunter. Use provided logs as evidence. Respond in JSON with keys answer and evidence (array of log snippets).' },
-    { role: 'user', content: `Question: ${question}\nLogs:\n${logText}` }
-  ]);
-
-  if (aiResp) {
-    try {
-      const parsed = JSON.parse(aiResp);
-      if (parsed.answer) {
-        if (!Array.isArray(parsed.evidence) || !parsed.evidence.length) {
-          parsed.evidence = logs[0] ? [logs[0]] : [];
-        }
-        return parsed;
+  
+  try {
+    const aiResp = await callModel([
+      { 
+        role: 'system', 
+        content: 'You are a SOC threat hunter. Analyze security questions using provided logs. Respond with valid JSON containing: answer (string), evidence (array of relevant log snippets or findings). Ensure valid JSON format.' 
+      },
+      { 
+        role: 'user', 
+        content: `Question: ${question}\n\nRelevant logs:\n${logText.slice(0, 4000)}` // Limit log size
       }
-    } catch (e) {
-      // ignore parse error
+    ]);
+
+    if (aiResp) {
+      try {
+        const cleanedResponse = aiResp.replace(/```json\n?|```/g, '').trim();
+        const parsed = JSON.parse(cleanedResponse);
+        
+        if (parsed.answer) {
+          if (!Array.isArray(parsed.evidence) || !parsed.evidence.length) {
+            parsed.evidence = logs.slice(0, 3); // Return first 3 logs as evidence if none provided
+          }
+          return parsed;
+        }
+      } catch (e) {
+        console.warn('Failed to parse threat hunter response as JSON:', e.message);
+      }
+      return { answer: aiResp, evidence: logs.slice(0, 3) };
     }
-    return { answer: aiResp, evidence: logs[0] ? [logs[0]] : [] };
+  } catch (error) {
+    console.error('Threat hunter query failed:', error.message);
   }
-  return { answer: `No AI available. Placeholder answer for: ${question}`, evidence: logs[0] ? [logs[0]] : [] };
+  
+  return { 
+    answer: `Unable to process query at this time. Original question: ${question}`,
+    evidence: logs.slice(0, 3)
+  };
 }
 
 module.exports = { analyzeAlert, hunterQuery };

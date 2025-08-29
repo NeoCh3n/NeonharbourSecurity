@@ -65,8 +65,12 @@
 - `VIRUSTOTAL_API_KEY`: VirusTotal API key for threat intelligence
 
 #### Optional:
-- `SPLUNK_HEC_URL`: Splunk HEC endpoint for log integration
-- `SPLUNK_HEC_TOKEN`: Splunk HEC authentication token
+- `SPLUNK_BASE_URL`: Splunk management API base (e.g., `https://localhost:8089`)
+- `SPLUNK_USERNAME` / `SPLUNK_PASSWORD`: Basic auth for Splunk API
+- `SPLUNK_BEARER_TOKEN` or `SPLUNK_SESSION_TOKEN`: Token auth for Splunk API
+- `SPLUNK_SEARCH`: Override the default Splunk search used by scripts
+  
+  See `docs/splunk_integration.md` for a step‑by‑step read‑only test flow.
 - `NODE_ENV`: Environment (development/production)
 - `PORT`: Backend port (default: 3000)
 

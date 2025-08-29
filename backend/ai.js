@@ -6,24 +6,30 @@ async function callModel(messages) {
     console.error('OpenAI API key not configured');
     throw new Error('AI service not configured');
   }
-  
+
+  const baseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+
   try {
+    const headers = { Authorization: `Bearer ${apiKey}` };
+    if (process.env.OPENROUTER_REFERRER) headers['HTTP-Referer'] = process.env.OPENROUTER_REFERRER;
+    if (process.env.OPENROUTER_TITLE) headers['X-Title'] = process.env.OPENROUTER_TITLE;
     const resp = await axios.post(
-      'https://openrouter.ai/api/v1/chat/completions',
-      { 
-        model: 'openai/gpt-4o-mini', 
+      `${baseUrl}/chat/completions`,
+      {
+        model,
         messages,
         temperature: 0.1,
-        max_tokens: 1000
+        max_tokens: 1000,
       },
-      { 
-        headers: { Authorization: `Bearer ${apiKey}` },
-        timeout: 30000
+      {
+        headers,
+        timeout: 30000,
       }
     );
     return resp.data.choices[0].message.content.trim();
   } catch (err) {
-    console.error('OpenAI API call failed:', err.message);
+    console.error('OpenAI-compatible API call failed:', err.message);
     throw new Error(`AI service unavailable: ${err.message}`);
   }
 }

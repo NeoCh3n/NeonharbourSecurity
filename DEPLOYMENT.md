@@ -65,6 +65,10 @@
 - `VIRUSTOTAL_API_KEY`: VirusTotal API key for threat intelligence
 
 #### Optional:
+- `OPENAI_BASE_URL`: Base URL for OpenAI‑compatible API (default: `https://api.openai.com/v1`). Set to `https://openrouter.ai/api/v1` to use OpenRouter.
+- `OPENAI_MODEL`: Chat model id (default: `gpt-4o-mini`; for OpenRouter use e.g. `openai/gpt-4o-mini`).
+- `OPENROUTER_REFERRER`: Optional header for OpenRouter rate‑limit context (e.g., your site URL).
+- `OPENROUTER_TITLE`: Optional header for OpenRouter identifying your app.
 - `SPLUNK_BASE_URL`: Splunk management API base (e.g., `https://localhost:8089`)
 - `SPLUNK_USERNAME` / `SPLUNK_PASSWORD`: Basic auth for Splunk API
 - `SPLUNK_BEARER_TOKEN` or `SPLUNK_SESSION_TOKEN`: Token auth for Splunk API
@@ -87,6 +91,12 @@ The application automatically creates the necessary tables:
    - Visit https://platform.openai.com/api-keys
    - Create a new secret key
    - Add to `.env` as `OPENAI_API_KEY`
+   - Optionally set `OPENAI_MODEL` (e.g., `gpt-4o` or `gpt-4o-mini`).
+
+   To use OpenRouter instead of native OpenAI:
+   - Set `OPENAI_BASE_URL=https://openrouter.ai/api/v1`
+   - Use an OpenRouter key in `OPENAI_API_KEY`
+   - Set `OPENAI_MODEL=openai/gpt-4o-mini` (OpenRouter model id format)
 
 2. **VirusTotal API**:
    - Visit https://www.virustotal.com/gui/user/<username>/apikey

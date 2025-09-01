@@ -41,7 +41,7 @@
    export NODE_ENV=production
    export JWT_SECRET=$(openssl rand -base64 32)
    export DATABASE_URL=postgresql://user:pass@host:5432/dbname
-   export OPENAI_API_KEY=your-actual-key
+   export DEEPSEEK_API_KEY=your-actual-key
    export VIRUSTOTAL_API_KEY=your-actual-key
    ```
 
@@ -61,14 +61,14 @@
 #### Required:
 - `JWT_SECRET`: Secret for JWT token signing
 - `DATABASE_URL`: PostgreSQL connection string
-- `OPENAI_API_KEY`: OpenAI API key for AI analysis
-- `VIRUSTOTAL_API_KEY`: VirusTotal API key for threat intelligence
+- `DEEPSEEK_API_KEY`: DeepSeek API key for AI analysis
+- `USE_VIRUSTOTAL`: Enable VirusTotal lookups (`true`/`false`, default `false`)
+- `VIRUSTOTAL_API_KEY`: VirusTotal API key for threat intelligence (leave empty to disable)
 
 #### Optional:
-- `OPENAI_BASE_URL`: Base URL for OpenAI‑compatible API (default: `https://api.openai.com/v1`). Set to `https://openrouter.ai/api/v1` to use OpenRouter.
-- `OPENAI_MODEL`: Chat model id (default: `gpt-4o-mini`; for OpenRouter use e.g. `openai/gpt-4o-mini`).
-- `OPENROUTER_REFERRER`: Optional header for OpenRouter rate‑limit context (e.g., your site URL).
-- `OPENROUTER_TITLE`: Optional header for OpenRouter identifying your app.
+- `DEEPSEEK_BASE_URL`: Base URL for DeepSeek (default: `https://api.deepseek.com/v1`).
+- `DEEPSEEK_MODEL`: Chat model id (default: `deepseek-chat`; also supports `deepseek-reasoner`).
+  
 - `SPLUNK_BASE_URL`: Splunk management API base (e.g., `https://localhost:8089`)
 - `SPLUNK_USERNAME` / `SPLUNK_PASSWORD`: Basic auth for Splunk API
 - `SPLUNK_BEARER_TOKEN` or `SPLUNK_SESSION_TOKEN`: Token auth for Splunk API
@@ -87,21 +87,17 @@ The application automatically creates the necessary tables:
 
 ### API Keys Setup
 
-1. **OpenAI API**:
-   - Visit https://platform.openai.com/api-keys
-   - Create a new secret key
-   - Add to `.env` as `OPENAI_API_KEY`
-   - Optionally set `OPENAI_MODEL` (e.g., `gpt-4o` or `gpt-4o-mini`).
+1. **DeepSeek API**:
+   - Visit https://platform.deepseek.com/api_keys and create a new secret key
+   - Add to `.env` as `DEEPSEEK_API_KEY`
+   - Optionally set `DEEPSEEK_BASE_URL=https://api.deepseek.com/v1`
+   - Optionally set `DEEPSEEK_MODEL=deepseek-chat` (or `deepseek-reasoner`)
+   - The backend uses an OpenAI‑compatible Chat Completions flow with DeepSeek.
 
-   To use OpenRouter instead of native OpenAI:
-   - Set `OPENAI_BASE_URL=https://openrouter.ai/api/v1`
-   - Use an OpenRouter key in `OPENAI_API_KEY`
-   - Set `OPENAI_MODEL=openai/gpt-4o-mini` (OpenRouter model id format)
-
-2. **VirusTotal API**:
-   - Visit https://www.virustotal.com/gui/user/<username>/apikey
-   - Create a new API key
-   - Add to `.env` as `VIRUSTOTAL_API_KEY`
+2. **VirusTotal API (optional)**:
+   - To disable: set `USE_VIRUSTOTAL=false` and leave `VIRUSTOTAL_API_KEY` empty (default in `.env.example`).
+   - To enable: set `USE_VIRUSTOTAL=true` and add `VIRUSTOTAL_API_KEY`.
+   - API keys: https://www.virustotal.com/gui/user/<username>/apikey
 
 ## Security Features
 

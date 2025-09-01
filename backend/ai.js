@@ -1,19 +1,17 @@
 const axios = require('axios');
 
 async function callModel(messages) {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) {
-    console.error('OpenAI API key not configured');
+    console.error('DeepSeek API key not configured');
     throw new Error('AI service not configured');
   }
 
-  const baseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
-  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const baseUrl = (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1').replace(/\/$/, '');
+  const model = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
 
   try {
     const headers = { Authorization: `Bearer ${apiKey}` };
-    if (process.env.OPENROUTER_REFERRER) headers['HTTP-Referer'] = process.env.OPENROUTER_REFERRER;
-    if (process.env.OPENROUTER_TITLE) headers['X-Title'] = process.env.OPENROUTER_TITLE;
     const resp = await axios.post(
       `${baseUrl}/chat/completions`,
       {
@@ -29,7 +27,7 @@ async function callModel(messages) {
     );
     return resp.data.choices[0].message.content.trim();
   } catch (err) {
-    console.error('OpenAI-compatible API call failed:', err.message);
+    console.error('DeepSeek API call failed:', err.message);
     throw new Error(`AI service unavailable: ${err.message}`);
   }
 }
@@ -120,22 +118,26 @@ async function analyzeAlert(alert) {
     });
   }
 
-  try {
-    const indicators = extractIndicators(alert);
-    for (const ind of indicators.slice(0, 5)) { // Limit to 5 indicators to avoid rate limiting
-      const intel = await queryVirusTotal(ind);
-      if (intel) {
-        timeline.push({
-          step: 'Threat intel lookup',
-          time: new Date().toISOString(),
-          action: 'VirusTotal query',
-          evidence: `${ind} - ${intel.malicious} malicious detection(s)`
-        });
-        evidence.push({ type: 'virustotal', indicator: ind, data: intel });
+  const vtFlag = (process.env.USE_VIRUSTOTAL || '').toLowerCase();
+  const vtEnabled = (vtFlag === '1' || vtFlag === 'true' || vtFlag === 'yes');
+  if (vtEnabled && process.env.VIRUSTOTAL_API_KEY) {
+    try {
+      const indicators = extractIndicators(alert);
+      for (const ind of indicators.slice(0, 5)) { // Limit to 5 indicators to avoid rate limiting
+        const intel = await queryVirusTotal(ind);
+        if (intel) {
+          timeline.push({
+            step: 'Threat intel lookup',
+            time: new Date().toISOString(),
+            action: 'VirusTotal query',
+            evidence: `${ind} - ${intel.malicious} malicious detection(s)`
+          });
+          evidence.push({ type: 'virustotal', indicator: ind, data: intel });
+        }
       }
+    } catch (error) {
+      console.error('Threat intelligence processing failed:', error.message);
     }
-  } catch (error) {
-    console.error('Threat intelligence processing failed:', error.message);
   }
 
   if (timeline.length < 2) {

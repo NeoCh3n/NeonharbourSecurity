@@ -47,13 +47,20 @@ else
 fi
 
 # Query Splunk export endpoint (streaming JSON). Accept self-signed certs with -k.
-curl -fksS \
-  "${HEADER_FLAGS[@]}" \
-  "${AUTH_FLAGS[@]}" \
-  --get "$SPLUNK_BASE_URL/services/search/jobs/export" \
-  --data-urlencode search="$SPLUNK_SEARCH" \
-  --data-urlencode output_mode=json \
+CURL_ARGS=( -fksS )
+if [[ ${#HEADER_FLAGS[@]:-0} -gt 0 ]]; then
+  CURL_ARGS+=( "${HEADER_FLAGS[@]}" )
+fi
+if [[ ${#AUTH_FLAGS[@]:-0} -gt 0 ]]; then
+  CURL_ARGS+=( "${AUTH_FLAGS[@]}" )
+fi
+CURL_ARGS+=(
+  --get "$SPLUNK_BASE_URL/services/search/jobs/export"
+  --data-urlencode "search=$SPLUNK_SEARCH"
+  --data-urlencode output_mode=json
   -o "$SPLUNK_OUTPUT_RAW"
+)
+curl "${CURL_ARGS[@]}"
 
 # Convert the streaming JSON into an array of result objects and tag source
 if ! command -v jq >/dev/null 2>&1; then

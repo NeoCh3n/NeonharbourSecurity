@@ -56,6 +56,15 @@ function generateToken(user) {
   return jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
 }
 
+function parseJsonMaybe(value, fallback) {
+  if (value == null) return fallback;
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try { return JSON.parse(value); } catch { return fallback; }
+  }
+  return fallback;
+}
+
 async function authMiddleware(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth) return res.status(401).json({ error: 'No token' });
@@ -123,6 +132,9 @@ async function processAlertsForUser(alertObjs, userId) {
   for (const alert of alertObjs) {
     try {
       const analysis = await analyzeAlert(alert);
+      const timelineJson = JSON.stringify(Array.isArray(analysis.timeline) ? analysis.timeline : []);
+      const evidenceJson = JSON.stringify(Array.isArray(analysis.evidence) ? analysis.evidence : []);
+      const rawJson = JSON.stringify(alert ?? {});
       const result = await pool.query(
         `INSERT INTO alerts (source, status, summary, severity, timeline, evidence, analysis_time, raw, user_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, created_at, source, status, summary, severity`,
@@ -131,10 +143,10 @@ async function processAlertsForUser(alertObjs, userId) {
           'needs_review',
           analysis.summary,
           analysis.severity,
-          analysis.timeline,
-          analysis.evidence,
+          timelineJson,
+          evidenceJson,
           analysis.analysisTime,
-          alert,
+          rawJson,
           userId
         ]
       );
@@ -212,7 +224,11 @@ app.get('/alerts/:id', authMiddleware, async (req, res) => {
       [id, req.user.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    row.timeline = parseJsonMaybe(row.timeline, []);
+    row.evidence = parseJsonMaybe(row.evidence, []);
+    row.raw = parseJsonMaybe(row.raw, {});
+    res.json(row);
   } catch (error) {
     console.error('Error fetching alert:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -228,7 +244,10 @@ app.get('/alerts/:id/investigation', authMiddleware, async (req, res) => {
       [id, req.user.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+    row.timeline = parseJsonMaybe(row.timeline, []);
+    row.evidence = parseJsonMaybe(row.evidence, []);
+    res.json(row);
   } catch (error) {
     console.error('Error fetching investigation:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -316,6 +335,32 @@ app.get('/metrics', authMiddleware, async (req, res) => {
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Detailed health for local testing (no secrets exposed)
+app.get('/health/details', (req, res) => {
+  const dsKey = !!process.env.DEEPSEEK_API_KEY;
+  const dsBase = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1';
+  const dsModel = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+  const vtFlag = (process.env.USE_VIRUSTOTAL || '').toLowerCase();
+  const vtEnabled = (vtFlag === '1' || vtFlag === 'true' || vtFlag === 'yes') && !!process.env.VIRUSTOTAL_API_KEY;
+  let baseOrigin = dsBase;
+  try { const u = new URL(dsBase); baseOrigin = `${u.protocol}//${u.host}` } catch {}
+
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    ai: {
+      provider: 'deepseek',
+      configured: dsKey,
+      base: baseOrigin,
+      model: dsModel,
+    },
+    virustotal: {
+      enabled: vtEnabled,
+      configured: !!process.env.VIRUSTOTAL_API_KEY,
+    }
+  });
 });
 
 const port = process.env.PORT || 3000;

@@ -198,6 +198,11 @@ public
 .out
 .storybook-out
 
+# Project outputs and caches
+# Generated artifacts and logs
+out/
+.npm-cache/
+
 # Temporary folders
 tmp/
 temp/

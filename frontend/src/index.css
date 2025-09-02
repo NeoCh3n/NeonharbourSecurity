@@ -1,0 +1,76 @@
+@layer base {
+  :root {
+    --bg: #0F1115; /* page background behind surfaces */
+    --surface: #FFFFFF;
+    --surface-alt: #F7F8FA;
+    --text: #1F2329;
+    --muted: #6B7280;
+    --primary: #2D6AE3;
+    --primary-fg: #FFFFFF;
+    --border: #E5E7EB;
+    --ring: #93C5FD;
+    --success: #16A34A;
+    --warning: #D97706;
+    --danger: #DC2626;
+    --info: #2563EB;
+  }
+
+  .theme-dark {
+    --bg: #0B0F14;
+    --surface: #111827;
+    --surface-alt: #0F172A;
+    --text: #E5E7EB;
+    --muted: #9CA3AF;
+    --primary: #60A5FA;
+    --primary-fg: #0B0F14;
+    --border: #1F2937;
+    --ring: #1D4ED8;
+    --success: #22C55E;
+    --warning: #F59E0B;
+    --danger: #F87171;
+    --info: #3B82F6;
+  }
+
+  .theme-hc {
+    --bg: #000000;
+    --surface: #000000;
+    --surface-alt: #0A0A0A;
+    --text: #FFFFFF;
+    --muted: #D1D5DB;
+    --primary: #00E5FF;
+    --primary-fg: #000000;
+    --border: #FFFFFF;
+    --ring: #00E5FF;
+    --success: #00FF00;
+    --warning: #FFFF00;
+    --danger: #FF0000;
+    --info: #00BFFF;
+  }
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+
+body { background: var(--bg); }
+
+.container-1280 {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+/* Desktop-only layout frame: 1280–1920 */
+.desktop-frame {
+  min-width: 1280px;
+  max-width: 1920px;
+  margin: 0 auto;
+}
+
+/* Focus ring for accessibility */
+.focus-ring:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+

@@ -1,0 +1,12 @@
+# Exclude dev/build artifacts from Docker build context
+node_modules
+.DS_Store
+.git
+.gitignore
+.env
+.env.*
+coverage
+*.log
+test
+tests
+

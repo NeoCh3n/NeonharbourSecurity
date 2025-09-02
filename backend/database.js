@@ -33,6 +33,11 @@ async function initDatabase() {
         entities JSONB,
         fingerprint TEXT,
         case_id INTEGER,
+        plan JSONB,
+        recommendations JSONB,
+        ack_time TIMESTAMP,
+        investigate_start TIMESTAMP,
+        resolve_time TIMESTAMP,
         embedding JSONB,
         embedding_text TEXT,
         timeline JSONB,
@@ -87,6 +92,11 @@ async function initDatabase() {
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS entities JSONB",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS fingerprint TEXT",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS case_id INTEGER",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS plan JSONB",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS recommendations JSONB",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS ack_time TIMESTAMP",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS investigate_start TIMESTAMP",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS resolve_time TIMESTAMP",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS embedding JSONB",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS embedding_text TEXT"
     ];

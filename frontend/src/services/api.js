@@ -99,4 +99,13 @@ export const metricsApi = {
   get: () => apiRequest('/metrics'),
 };
 
+export const planApi = {
+  get: (id) => apiRequest(`/alerts/${id}/plan`),
+  update: (id, payload) => apiRequest(`/alerts/${id}/plan`, { method: 'POST', body: JSON.stringify(payload) })
+};
+
+export const actionsApi = {
+  request: (id, action, reason) => apiRequest(`/actions/${id}/request`, { method: 'POST', body: JSON.stringify({ action, reason }) })
+};
+
 export default apiRequest;

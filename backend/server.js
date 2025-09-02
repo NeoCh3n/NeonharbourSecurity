@@ -128,6 +128,7 @@ app.get('/auth/me', authMiddleware, (req, res) => {
 
 const { runPipeline } = require('./pipeline/runPipeline');
 const { upsertCaseForFingerprint, linkAlertToCase } = require('./casing/case_linker');
+const { generatePlan, generateRecommendations } = require('./planning/plan');
 
 // Helper to process and persist alert objects
 async function processAlertsForUser(alertObjs, userId) {
@@ -143,15 +144,21 @@ async function processAlertsForUser(alertObjs, userId) {
       const rawJson = JSON.stringify(alert ?? {});
       // Link to case by fingerprint
       const caseId = await upsertCaseForFingerprint(unified.fingerprint, unified.severity || 'low');
+      const plan = generatePlan(unified, analysis);
+      const recommendations = generateRecommendations(unified);
       const result = await pool.query(
         `INSERT INTO alerts (
            source, status, summary, severity, category, action, technique, confidence,
-           principal, asset, entities, fingerprint, case_id, embedding, embedding_text,
+           principal, asset, entities, fingerprint, case_id, plan, recommendations,
+           ack_time, investigate_start, resolve_time,
+           embedding, embedding_text,
            timeline, evidence, analysis_time, raw, user_id
          ) VALUES (
            $1,$2,$3,$4,$5,$6,$7,$8,
            $9,$10,$11,$12,$13,$14,$15,
-           $16,$17,$18,$19,$20
+           $16,$17,$18,
+           $19,$20,
+           $21,$22,$23,$24,$25
          ) RETURNING id, created_at, source, status, summary, severity`,
         [
           unified.source || 'ingest',
@@ -167,6 +174,11 @@ async function processAlertsForUser(alertObjs, userId) {
           JSON.stringify(unified.entities || []),
           unified.fingerprint || null,
           caseId || null,
+          JSON.stringify(plan || {}),
+          JSON.stringify(recommendations || []),
+          null,
+          null,
+          null,
           unified.embedding ? JSON.stringify(unified.embedding) : null,
           unified.embeddingText || null,
           timelineJson,
@@ -255,6 +267,8 @@ app.get('/alerts/:id', authMiddleware, async (req, res) => {
     row.timeline = parseJsonMaybe(row.timeline, []);
     row.evidence = parseJsonMaybe(row.evidence, []);
     row.raw = parseJsonMaybe(row.raw, {});
+    row.plan = parseJsonMaybe(row.plan, {});
+    row.recommendations = parseJsonMaybe(row.recommendations, []);
     res.json(row);
   } catch (error) {
     console.error('Error fetching alert:', error);
@@ -277,6 +291,76 @@ app.get('/alerts/:id/investigation', authMiddleware, async (req, res) => {
     res.json(row);
   } catch (error) {
     console.error('Error fetching investigation:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get plan for an alert
+app.get('/alerts/:id/plan', authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const r = await pool.query('SELECT plan, recommendations, ack_time, investigate_start, resolve_time FROM alerts WHERE id=$1 AND user_id=$2', [id, req.user.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const row = r.rows[0];
+    row.plan = parseJsonMaybe(row.plan, {});
+    row.recommendations = parseJsonMaybe(row.recommendations, []);
+    res.json(row);
+  } catch (error) {
+    console.error('Error fetching plan:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update plan or toggle step
+app.post('/alerts/:id/plan', authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const r = await pool.query('SELECT plan, ack_time, investigate_start, resolve_time FROM alerts WHERE id=$1 AND user_id=$2', [id, req.user.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    let plan = parseJsonMaybe(r.rows[0].plan, {});
+    const { stepId, done, plan: newPlan } = req.body || {};
+    let ack = r.rows[0].ack_time;
+    let inv = r.rows[0].investigate_start;
+    let reso = r.rows[0].resolve_time;
+    if (newPlan) {
+      plan = newPlan;
+    } else if (stepId) {
+      const idx = Array.isArray(plan.steps) ? plan.steps.findIndex(s => s.id === stepId) : -1;
+      if (idx >= 0) {
+        plan.steps[idx].done = !!done;
+        // update timestamps heuristically
+        if (stepId === 'ack' && !ack && done) ack = new Date().toISOString();
+        if (stepId === 'collect' && !inv && done) inv = new Date().toISOString();
+        if (stepId === 'report' && !reso && done) reso = new Date().toISOString();
+      }
+    }
+    const upd = await pool.query(
+      'UPDATE alerts SET plan=$1, ack_time=$2, investigate_start=$3, resolve_time=$4 WHERE id=$5 AND user_id=$6 RETURNING plan, ack_time, investigate_start, resolve_time',
+      [JSON.stringify(plan || {}), ack, inv, reso, id, req.user.id]
+    );
+    const row = upd.rows[0];
+    row.plan = parseJsonMaybe(row.plan, {});
+    res.json(row);
+  } catch (error) {
+    console.error('Error updating plan:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Request an action (human approval flow placeholder)
+app.post('/actions/:id/request', authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { action, reason } = req.body || {};
+  if (!action) return res.status(400).json({ error: 'Missing action' });
+  try {
+    const traceId = Math.random().toString(36).slice(2);
+    await pool.query(
+      'INSERT INTO audit_logs (action, user_id, details, ip_address) VALUES ($1, $2, $3, $4)',
+      ['action_request', req.user.id, { alertId: id, action, reason, traceId }, req.ip]
+    );
+    res.json({ success: true, traceId });
+  } catch (error) {
+    console.error('Error creating action request:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

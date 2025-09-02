@@ -21,9 +21,20 @@ export function Sidebar() {
               {expanded && <span>Threat Hunter</span>}
             </NavLink>
           </li>
+          <li>
+            <NavLink to="/ingest" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
+              <span>🧪</span>
+              {expanded && <span>验证/写入</span>}
+            </NavLink>
+          </li>
+          <li>
+            <NavLink to="/alerts-list" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
+              <span>📄</span>
+              {expanded && <span>告警列表</span>}
+            </NavLink>
+          </li>
         </ul>
       </nav>
     </aside>
   );
 }
-

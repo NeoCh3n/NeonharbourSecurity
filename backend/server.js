@@ -126,23 +126,49 @@ app.get('/auth/me', authMiddleware, (req, res) => {
   res.json({ id: req.user.id, email: req.user.email });
 });
 
+const { runPipeline } = require('./pipeline/runPipeline');
+const { upsertCaseForFingerprint, linkAlertToCase } = require('./casing/case_linker');
+
 // Helper to process and persist alert objects
 async function processAlertsForUser(alertObjs, userId) {
   const processed = [];
   for (const alert of alertObjs) {
     try {
-      const analysis = await analyzeAlert(alert);
+      // Normalize + semantics + fingerprint + embedding
+      const unified = await runPipeline(alert);
+      // AI analysis on unified alert for richer summary/timeline
+      const analysis = await analyzeAlert(unified);
       const timelineJson = JSON.stringify(Array.isArray(analysis.timeline) ? analysis.timeline : []);
       const evidenceJson = JSON.stringify(Array.isArray(analysis.evidence) ? analysis.evidence : []);
       const rawJson = JSON.stringify(alert ?? {});
+      // Link to case by fingerprint
+      const caseId = await upsertCaseForFingerprint(unified.fingerprint, unified.severity || 'low');
       const result = await pool.query(
-        `INSERT INTO alerts (source, status, summary, severity, timeline, evidence, analysis_time, raw, user_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, created_at, source, status, summary, severity`,
+        `INSERT INTO alerts (
+           source, status, summary, severity, category, action, technique, confidence,
+           principal, asset, entities, fingerprint, case_id, embedding, embedding_text,
+           timeline, evidence, analysis_time, raw, user_id
+         ) VALUES (
+           $1,$2,$3,$4,$5,$6,$7,$8,
+           $9,$10,$11,$12,$13,$14,$15,
+           $16,$17,$18,$19,$20
+         ) RETURNING id, created_at, source, status, summary, severity`,
         [
-          alert.source || 'ingest',
+          unified.source || 'ingest',
           'needs_review',
-          analysis.summary,
-          analysis.severity,
+          analysis.summary || unified.summary,
+          analysis.severity || unified.severity || 'low',
+          unified.category || null,
+          unified.action || null,
+          unified.technique || null,
+          typeof unified.confidence === 'number' ? unified.confidence : null,
+          JSON.stringify(unified.principal || {}),
+          JSON.stringify(unified.asset || {}),
+          JSON.stringify(unified.entities || []),
+          unified.fingerprint || null,
+          caseId || null,
+          unified.embedding ? JSON.stringify(unified.embedding) : null,
+          unified.embeddingText || null,
           timelineJson,
           evidenceJson,
           analysis.analysisTime,
@@ -150,6 +176,7 @@ async function processAlertsForUser(alertObjs, userId) {
           userId
         ]
       );
+      try { await linkAlertToCase(caseId, result.rows[0].id); } catch {}
       processed.push(result.rows[0]);
     } catch (error) {
       console.error('Error processing alert:', error);

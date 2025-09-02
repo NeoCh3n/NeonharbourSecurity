@@ -24,6 +24,17 @@ async function initDatabase() {
         status VARCHAR(20) DEFAULT 'new',
         summary TEXT,
         severity VARCHAR(20),
+        category VARCHAR(50),
+        action VARCHAR(100),
+        technique VARCHAR(100),
+        confidence REAL,
+        principal JSONB,
+        asset JSONB,
+        entities JSONB,
+        fingerprint TEXT,
+        case_id INTEGER,
+        embedding JSONB,
+        embedding_text TEXT,
         timeline JSONB,
         evidence JSONB,
         analysis_time INTEGER,
@@ -43,6 +54,49 @@ async function initDatabase() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // Cases and mapping table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cases (
+        id SERIAL PRIMARY KEY,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        anchor_fingerprint TEXT UNIQUE,
+        severity VARCHAR(20),
+        status VARCHAR(20) DEFAULT 'open',
+        owner VARCHAR(100),
+        context JSONB
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS case_alerts (
+        case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+        alert_id INTEGER REFERENCES alerts(id) ON DELETE CASCADE,
+        PRIMARY KEY (case_id, alert_id)
+      )
+    `);
+
+    // Add missing columns if upgrading from earlier schema
+    const alterSqls = [
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS category VARCHAR(50)",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS action VARCHAR(100)",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS technique VARCHAR(100)",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS confidence REAL",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS principal JSONB",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS asset JSONB",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS entities JSONB",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS fingerprint TEXT",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS case_id INTEGER",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS embedding JSONB",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS embedding_text TEXT"
+    ];
+    for (const sql of alterSqls) {
+      try { await pool.query(sql); } catch {}
+    }
+
+    // Basic indexes
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_alerts_fingerprint ON alerts (fingerprint)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_alerts_case_id ON alerts (case_id)');
 
     console.log('Database initialized successfully');
   } catch (error) {

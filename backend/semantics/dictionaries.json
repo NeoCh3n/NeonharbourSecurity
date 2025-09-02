@@ -1,0 +1,30 @@
+{
+  "action": {
+    "login": "AUTH_LOGIN",
+    "logon": "AUTH_LOGIN",
+    "sign-in": "AUTH_LOGIN",
+    "signin": "AUTH_LOGIN",
+    "session_start": "AUTH_LOGIN",
+    "session": "AUTH_SESSION",
+    "logout": "AUTH_LOGOUT",
+    "block": "SEC_BLOCK",
+    "quarantine": "SEC_QUARANTINE",
+    "isolate": "SEC_ISOLATE",
+    "email_delivered": "EMAIL_DELIVERED",
+    "email_blocked": "EMAIL_BLOCKED"
+  },
+  "category": {
+    "auth": "authentication",
+    "authentication": "authentication",
+    "endpoint": "endpoint",
+    "email": "email",
+    "network": "network",
+    "cloud": "cloud"
+  },
+  "technique": {
+    "T1110": "TA0006/T1110",
+    "bruteforce": "TA0006/T1110",
+    "credential_access": "TA0006"
+  }
+}
+

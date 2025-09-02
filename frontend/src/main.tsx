@@ -8,6 +8,8 @@ import App from './App.tsx';
 import LoginPage from './pages/Login.tsx';
 import DashboardPage from './pages/Dashboard.tsx';
 import ThreatHunterPage from './pages/ThreatHunter.tsx';
+import IngestPage from './pages/Ingest.tsx';
+import AlertsListPage from './pages/AlertsList.tsx';
 import { ThemeProvider } from './store/theme';
 import { worker } from './mocks/browser';
 
@@ -23,7 +25,9 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <DashboardPage /> },
       { path: 'dashboard', element: <DashboardPage /> },
-      { path: 'threat-hunter', element: <ThreatHunterPage /> }
+      { path: 'threat-hunter', element: <ThreatHunterPage /> },
+      { path: 'ingest', element: <IngestPage /> },
+      { path: 'alerts-list', element: <AlertsListPage /> }
     ]
   },
   { path: '/login', element: <LoginPage /> }

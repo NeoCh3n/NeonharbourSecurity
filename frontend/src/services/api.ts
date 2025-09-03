@@ -1,62 +1,59 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
+const API_BASE: string = (import.meta as any).env.VITE_API_BASE_URL || '/api';
 
-class ApiError extends Error {
-  constructor(message, status) {
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
   }
 }
 
-async function apiRequest(endpoint, options = {}) {
+async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
   const token = localStorage.getItem('token');
-  const isFormData = options.body instanceof FormData;
+  const isFormData = options && typeof (options as any).body !== 'undefined' && (options as any).body instanceof FormData;
 
-  const headers = {
+  const headers: Record<string, string> = {
     ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
-    ...options.headers,
-  };
+    ...((options as any).headers || {}),
+  } as Record<string, string>;
 
   if (token) {
-    headers.Authorization = `Bearer ${token}`;
+    (headers as any).Authorization = `Bearer ${token}`;
   }
 
-  const config = {
+  const config: RequestInit = {
     ...options,
     headers,
   };
 
   try {
     const response = await fetch(`${API_BASE}${endpoint}`, config);
-    
     if (!response.ok) {
       let errorMessage = `HTTP error ${response.status}`;
       try {
         const errorData = await response.json();
-        errorMessage = errorData.error || errorMessage;
-      } catch (e) {
-        // Unable to parse error response
+        errorMessage = (errorData as any).error || errorMessage;
+      } catch {
+        // ignore
       }
       throw new ApiError(errorMessage, response.status);
     }
-
     return await response.json();
-  } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
+  } catch (error: any) {
+    if (error instanceof ApiError) throw error;
     throw new ApiError('Network error', 0);
   }
 }
 
 export const authApi = {
-  register: (email, password) => 
+  register: (email: string, password: string) =>
     apiRequest('/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
 
-  login: (email, password) =>
+  login: (email: string, password: string) =>
     apiRequest('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
@@ -66,21 +63,21 @@ export const authApi = {
 };
 
 export const alertsApi = {
-  upload: (file) => {
+  upload: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
     return apiRequest('/alerts/upload', {
       method: 'POST',
-      headers: {},
+      headers: {} as any,
       body: formData,
     });
   },
 
   list: () => apiRequest('/alerts'),
 
-  get: (id) => apiRequest(`/alerts/${id}`),
+  get: (id: number) => apiRequest(`/alerts/${id}`),
 
-  feedback: (id, feedback) =>
+  feedback: (id: number, feedback: string) =>
     apiRequest(`/alerts/${id}/feedback`, {
       method: 'POST',
       body: JSON.stringify({ feedback }),
@@ -88,7 +85,7 @@ export const alertsApi = {
 };
 
 export const hunterApi = {
-  query: (question, logs = []) =>
+  query: (question: string, logs: string[] = []) =>
     apiRequest('/hunter/query', {
       method: 'POST',
       body: JSON.stringify({ question, logs }),
@@ -100,12 +97,12 @@ export const metricsApi = {
 };
 
 export const planApi = {
-  get: (id) => apiRequest(`/alerts/${id}/plan`),
-  update: (id, payload) => apiRequest(`/alerts/${id}/plan`, { method: 'POST', body: JSON.stringify(payload) })
+  get: (id: number) => apiRequest(`/alerts/${id}/plan`),
+  update: (id: number, payload: any) => apiRequest(`/alerts/${id}/plan`, { method: 'POST', body: JSON.stringify(payload) })
 };
 
 export const actionsApi = {
-  request: (id, action, reason) => apiRequest(`/actions/${id}/request`, { method: 'POST', body: JSON.stringify({ action, reason }) })
+  request: (id: number, action: string, reason: string) => apiRequest(`/actions/${id}/request`, { method: 'POST', body: JSON.stringify({ action, reason }) })
 };
 
 export default apiRequest;

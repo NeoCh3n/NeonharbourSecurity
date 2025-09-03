@@ -92,21 +92,16 @@ export default function InvestigatePage() {
         </div>
       </div>
       <div className="col-span-12 lg:col-span-3 space-y-3">
-        <div className="bg-surface rounded-lg border border-border p-3">
-          <div className="font-semibold mb-2">潜在外泄动作</div>
-          <div style={{ height: 160 }}>
-            <ChartFrame title="HTTP Methods">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={exfilData}>
-                  <XAxis dataKey="name" />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="value" fill="#60A5FA" />
-                </BarChart>
-              </ResponsiveContainer>
-            </ChartFrame>
-          </div>
-        </div>
+        <ChartFrame title="潜在外泄动作（HTTP Methods）">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={exfilData}>
+              <XAxis dataKey="name" />
+              <YAxis />
+              <Tooltip />
+              <Bar dataKey="value" fill="#60A5FA" />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartFrame>
         <div className="bg-surface rounded-lg border border-border p-3">
           <div className="font-semibold mb-2">事件表格</div>
           <div className="text-sm text-muted">右侧区域用于呈现关键事件明细（可导出）。</div>

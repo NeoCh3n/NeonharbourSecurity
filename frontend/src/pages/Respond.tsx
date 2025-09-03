@@ -42,6 +42,11 @@ export default function RespondPage() {
     }
   }
 
+  useEffect(() => {
+    const q = params.get('alertId');
+    if (q) setAlertId(q);
+  }, [params]);
+
   return (
     <div className="grid grid-cols-12 gap-3">
       <div className="col-span-12 lg:col-span-8 space-y-3">
@@ -138,7 +143,3 @@ export default function RespondPage() {
     </div>
   );
 }
-  useEffect(() => {
-    const q = params.get('alertId');
-    if (q) setAlertId(q);
-  }, [params]);

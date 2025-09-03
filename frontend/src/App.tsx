@@ -13,7 +13,7 @@ export default function App() {
   // Example: redirect unknown root to dashboard
   useEffect(() => {
     if (location.pathname === '/') {
-      navigate('/dashboard', { replace: true });
+      navigate('/plan', { replace: true });
     }
   }, [location.pathname, navigate]);
 
@@ -30,4 +30,3 @@ export default function App() {
     </div>
   );
 }
-

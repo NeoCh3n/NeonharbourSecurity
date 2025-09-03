@@ -6,6 +6,13 @@ export default defineConfig(({ mode }) => {
   
   return {
     plugins: [react()],
+    resolve: {
+      alias: {
+        'react-chartjs-2': '/src/shims/react-chartjs-2.ts',
+        'chart.js/auto': '/src/shims/chartjs.ts',
+        'chart.js': '/src/shims/chartjs.ts',
+      }
+    },
     base: '/',
     build: {
       outDir: 'dist',

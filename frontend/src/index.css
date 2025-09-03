@@ -74,3 +74,15 @@ body { background: var(--bg); }
   outline-offset: 2px;
 }
 
+/* Neon accent helpers */
+.neon-gradient {
+  background: linear-gradient(90deg, #00F5FF 0%, #2D7BFF 100%);
+}
+.neon-text {
+  background: linear-gradient(90deg, #00F5FF, #2D7BFF);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.glow-border {
+  box-shadow: 0 0 0 1px rgba(45, 123, 255, 0.4), 0 0 12px rgba(45, 123, 255, 0.2);
+}

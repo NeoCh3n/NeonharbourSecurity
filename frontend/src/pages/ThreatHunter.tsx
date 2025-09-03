@@ -137,6 +137,9 @@ export default function ThreatHunterPage() {
 
   return (
     <div className="space-y-3">
+      <div className="bg-surface rounded-lg border border-border p-3 text-sm text-muted">
+        Hunt 工作台：输入问题与（可选）日志。若未配置 AI Key，系统会返回降级回答以保证可用性。
+      </div>
       <section className="bg-surface rounded-lg border border-border p-3 shadow-sm flex flex-wrap items-center gap-2">
         <input className="px-3 py-1.5 rounded-md border border-border bg-surface text-text w-[360px]" placeholder="搜索 / Search" />
         <select className="px-2 py-1.5 rounded-md border border-border"><option>Severity</option></select>

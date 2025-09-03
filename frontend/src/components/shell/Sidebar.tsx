@@ -10,21 +10,21 @@ export function Sidebar() {
       <nav className="p-3">
         <ul className="space-y-1">
           <li>
-            <NavLink to="/dashboard" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
-              <span>🏠</span>
-              {expanded && <span>Dashboard</span>}
+            <NavLink to="/report" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
+              <span>📊</span>
+              {expanded && <span>Report</span>}
             </NavLink>
           </li>
           <li>
-            <NavLink to="/threat-hunter" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
+            <NavLink to="/hunt" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
               <span>🧭</span>
-              {expanded && <span>Threat Hunter</span>}
+              {expanded && <span>Hunt</span>}
             </NavLink>
           </li>
           <li>
             <NavLink to="/ingest" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
-              <span>🧪</span>
-              {expanded && <span>验证/写入</span>}
+              <span>🔌</span>
+              {expanded && <span>数据源</span>}
             </NavLink>
           </li>
           <li>

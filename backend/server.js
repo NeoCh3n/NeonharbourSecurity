@@ -11,6 +11,8 @@ const { analyzeAlert, hunterQuery } = require('./ai');
 const { pool, initDatabase } = require('./database');
 
 const app = express();
+// Behind nginx reverse proxy in docker-compose
+app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet({

@@ -13,7 +13,12 @@ export default function AlertsListPage() {
 
   useEffect(() => {
     alertsApi.list()
-      .then((data: any) => setRows(data.alerts || []))
+      .then((data: any) => {
+        const list: Row[] = data.alerts || [];
+        // Ensure newest at top in UI even if backend changes default
+        list.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setRows(list);
+      })
       .catch((e: any) => setError(e?.message || '加载失败'));
   }, []);
 
@@ -82,11 +87,12 @@ export default function AlertsListPage() {
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td className="px-3 py-4 text-muted" colSpan={5}>暂无数据 / No alerts</td></tr>
+              <tr><td className="px-3 py-4 text-muted" colSpan={6}>暂无数据 / No alerts</td></tr>
             )}
           </tbody>
         </table>
       </div>
+      <div className="text-xs text-muted">提示：最新写入显示在最前。如看不到新数据，请刷新或重新拉取。</div>
       {detail && (
         <div className="bg-surface rounded-lg border border-border p-3 text-sm">
           <div className="font-semibold mb-2">告警详情 #{detail.id}</div>

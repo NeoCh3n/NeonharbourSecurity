@@ -109,7 +109,7 @@ export default function AlertsListPage() {
           <div className="mt-2"><span className="text-muted">Timeline:</span>
             <pre className="mt-1 p-2 bg-surfaceAlt rounded-md overflow-auto">{JSON.stringify(detail.timeline, null, 2)}</pre>
           </div>
-          <div className="mt-2"><span className="text-muted">Plan:</span>
+          <div className="mt-2"><span className="text-muted">Plan (AI 生成):</span>
             {plan ? (
               <div className="mt-1 p-2 bg-surfaceAlt rounded-md">
                 <div className="text-muted">步骤 / Steps</div>

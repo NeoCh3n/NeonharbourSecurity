@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import apiRequest, { actionsApi } from '../services/api';
 
 export default function RespondPage() {
+  const [params] = useSearchParams();
   const [determination, setDetermination] = useState<'Malicious'|'Benign'|'Uncertain'>('Uncertain');
   const [severity, setSeverity] = useState<'Low'|'Medium'|'High'|'Critical'>('Medium');
   const [confidence, setConfidence] = useState(72);
@@ -136,3 +138,7 @@ export default function RespondPage() {
     </div>
   );
 }
+  useEffect(() => {
+    const q = params.get('alertId');
+    if (q) setAlertId(q);
+  }, [params]);

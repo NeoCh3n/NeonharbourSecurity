@@ -1,16 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import apiRequest from '../services/api';
 import { ChartFrame } from '../components/charts/ChartFrame';
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 type Event = { ts: string; text: string; sev: 'Low'|'Medium'|'High' };
 
 export default function InvestigatePage() {
-  const [timeline] = useState<Event[]>([
+  const [params] = useSearchParams();
+  const alertId = params.get('alertId');
+  const [timeline, setTimeline] = useState<Event[]>([
     { ts: new Date(Date.now()-60*60*1000).toISOString(), text: '成功登录 azure – alice', sev: 'Low' },
     { ts: new Date(Date.now()-55*60*1000).toISOString(), text: '非常规地点登录 – 香港 -> 新加坡', sev: 'Medium' },
     { ts: new Date(Date.now()-50*60*1000).toISOString(), text: '主机 hk-core-srv-12 执行 powershell.exe', sev: 'High' },
     { ts: new Date(Date.now()-48*60*1000).toISOString(), text: '可疑外联到 203.0.113.5:443', sev: 'Medium' },
   ]);
+  const [inv, setInv] = useState<{ summary?: string; evidence?: any[] } | null>(null);
   const [qna, setQna] = useState<{q: string; a?: string; evidence?: any}[]>([
     { q: '用户是否近期异常登录？', a: '在 55 分钟前出现非常规地点登录。' },
   ]);
@@ -23,6 +28,22 @@ export default function InvestigatePage() {
       { name: 'DELETE', value: 0 }
     ]
   ), []);
+
+  useEffect(() => {
+    (async () => {
+      if (!alertId) return;
+      try {
+        const r = await apiRequest(`/alerts/${alertId}/investigation`);
+        const tl: Event[] = Array.isArray(r.timeline) ? r.timeline.map((t: any, i: number) => ({
+          ts: t.time || new Date(Date.now() - (i+1) * 5 * 60_000).toISOString(),
+          text: `${t.step || t.action || '事件'} - ${t.evidence || ''}`,
+          sev: (i === 0 ? 'Low' : i === 1 ? 'Medium' : 'High')
+        })) : [];
+        if (tl.length) setTimeline(tl);
+        setInv({ summary: r.summary, evidence: r.evidence });
+      } catch {}
+    })();
+  }, [alertId]);
 
   function digDeeper() {
     setQna(prev => ([...prev, { q: 'Dig Deeper: 最近 2 小时同用户是否有提权事件？', a: '发现 1 次管理员组成员查询，暂无直接提权证据。' }]));
@@ -66,6 +87,8 @@ export default function InvestigatePage() {
         <div className="bg-surface rounded-lg border border-border p-3">
           <div className="font-semibold mb-1">事件摘要</div>
           <div className="text-sm text-muted">跨源检索与关联后的关键事件摘要。</div>
+          {inv?.summary && <div className="mt-2 text-sm">{inv.summary}</div>}
+          {inv?.evidence && <pre className="mt-2 text-xs bg-surfaceAlt rounded-md p-2 overflow-auto">{JSON.stringify(inv.evidence, null, 2)}</pre>}
         </div>
       </div>
       <div className="col-span-12 lg:col-span-3 space-y-3">

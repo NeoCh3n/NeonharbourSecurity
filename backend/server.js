@@ -128,6 +128,7 @@ app.get('/auth/me', authMiddleware, (req, res) => {
 
 const { runPipeline } = require('./pipeline/runPipeline');
 const { upsertCaseForFingerprint, linkAlertToCase } = require('./casing/case_linker');
+const { findSimilarCaseCandidate } = require('./casing/case_linker');
 const { generatePlan, generateRecommendations } = require('./planning/plan');
 
 // Helper to process and persist alert objects
@@ -143,7 +144,14 @@ async function processAlertsForUser(alertObjs, userId) {
       const evidenceJson = JSON.stringify(Array.isArray(analysis.evidence) ? analysis.evidence : []);
       const rawJson = JSON.stringify(alert ?? {});
       // Link to case by fingerprint
-      const caseId = await upsertCaseForFingerprint(unified.fingerprint, unified.severity || 'low');
+      let caseId;
+      try {
+        const sim = await findSimilarCaseCandidate(unified.embedding?.vec, userId);
+        if (sim?.caseId) caseId = sim.caseId;
+      } catch {}
+      if (!caseId) {
+        caseId = await upsertCaseForFingerprint(unified.fingerprint, unified.severity || 'low');
+      }
       const plan = generatePlan(unified, analysis);
       const recommendations = generateRecommendations(unified);
       const result = await pool.query(
@@ -151,14 +159,15 @@ async function processAlertsForUser(alertObjs, userId) {
            source, status, summary, severity, category, action, technique, confidence,
            principal, asset, entities, fingerprint, case_id, plan, recommendations,
            ack_time, investigate_start, resolve_time,
-           embedding, embedding_text,
+           embedding, embedding_text, embedding_vec,
            timeline, evidence, analysis_time, raw, user_id
          ) VALUES (
            $1,$2,$3,$4,$5,$6,$7,$8,
            $9,$10,$11,$12,$13,$14,$15,
            $16,$17,$18,
            $19,$20,
-           $21,$22,$23,$24,$25
+           $21,$22,$23,
+           $24,$25,$26,$27,$28
          ) RETURNING id, created_at, source, status, summary, severity`,
         [
           unified.source || 'ingest',
@@ -181,6 +190,7 @@ async function processAlertsForUser(alertObjs, userId) {
           null,
           unified.embedding ? JSON.stringify(unified.embedding) : null,
           unified.embeddingText || null,
+          Array.isArray(unified.embedding?.vec) ? `[${unified.embedding.vec.join(',')}]` : null,
           timelineJson,
           evidenceJson,
           analysis.analysisTime,
@@ -416,6 +426,18 @@ app.get('/metrics', authMiddleware, async (req, res) => {
        FROM alerts WHERE user_id = $1`,
       [req.user.id]
     );
+
+    // MTTI: avg(investigate_start - created_at); MTTR: avg(resolve_time - created_at)
+    const mttiResult = await pool.query(
+      `SELECT AVG(EXTRACT(EPOCH FROM (investigate_start - created_at))) as mtti_sec
+       FROM alerts WHERE user_id = $1 AND investigate_start IS NOT NULL`,
+      [req.user.id]
+    );
+    const mttrResult = await pool.query(
+      `SELECT AVG(EXTRACT(EPOCH FROM (resolve_time - created_at))) as mttr_sec
+       FROM alerts WHERE user_id = $1 AND resolve_time IS NOT NULL`,
+      [req.user.id]
+    );
     
     const severityCounts = {};
     severityResult.rows.forEach(row => {
@@ -435,7 +457,9 @@ app.get('/metrics', authMiddleware, async (req, res) => {
       statusCounts,
       investigatedCount: parseInt(totalResult.rows[0].total),
       feedbackScore,
-      avgAnalysisTime: timeResult.rows[0].avg_time ? parseFloat(timeResult.rows[0].avg_time) : 0
+      avgAnalysisTime: timeResult.rows[0].avg_time ? parseFloat(timeResult.rows[0].avg_time) : 0,
+      mttiSec: mttiResult.rows[0].mtti_sec ? parseFloat(mttiResult.rows[0].mtti_sec) : 0,
+      mttrSec: mttrResult.rows[0].mttr_sec ? parseFloat(mttrResult.rows[0].mttr_sec) : 0
     });
   } catch (error) {
     console.error('Error fetching metrics:', error);

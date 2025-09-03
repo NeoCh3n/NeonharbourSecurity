@@ -52,9 +52,17 @@ export default function DashboardPage() {
   const cards = [
     { label: 'Total Alerts', value: metricsQ.data?.totalAlerts ?? 0 },
     { label: 'Avg Analysis Time', value: (metricsQ.data?.avgAnalysisTime ?? 0) + ' ms' },
+    { label: 'MTTI', value: formatMin(metricsQ.data?.mttiSec) },
+    { label: 'MTTR', value: formatMin(metricsQ.data?.mttrSec) },
     { label: 'Investigated', value: metricsQ.data?.investigatedCount ?? 0 },
     { label: 'Feedback Score', value: (metricsQ.data?.feedbackScore ?? 0) + '%' },
   ];
+
+  function formatMin(seconds?: number) {
+    const s = Math.max(0, Math.round(seconds || 0));
+    const m = (s / 60).toFixed(1);
+    return `${m} min`;
+  }
 
   return (
     <div className="space-y-4">

@@ -20,10 +20,9 @@ async function runPipeline(raw) {
   // Step 5: Priority score
   unified.priority = scorePriority(unified);
   // Step 6: Embedding (async placeholder)
-  unified.embedding = await computeEmbedding(unified); // may be null
+  unified.embedding = await computeEmbedding(unified); // { vec, ... }
   unified.embeddingText = buildText(unified); // store text for future embedding job
   return unified;
 }
 
 module.exports = { runPipeline };
-

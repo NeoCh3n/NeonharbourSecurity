@@ -108,6 +108,17 @@ async function initDatabase() {
     await pool.query('CREATE INDEX IF NOT EXISTS idx_alerts_fingerprint ON alerts (fingerprint)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_alerts_case_id ON alerts (case_id)');
 
+    // Try to enable pgvector if available (optional)
+    try {
+      await pool.query('CREATE EXTENSION IF NOT EXISTS vector');
+      // Optional vector column for similarity
+      await pool.query('ALTER TABLE alerts ADD COLUMN IF NOT EXISTS embedding_vec vector(64)');
+      // Optional index
+      await pool.query('CREATE INDEX IF NOT EXISTS idx_alerts_embedding_vec ON alerts USING ivfflat (embedding_vec vector_l2_ops) WITH (lists = 50)');
+    } catch (e) {
+      console.warn('pgvector not available or cannot be enabled:', e.message);
+    }
+
     console.log('Database initialized successfully');
   } catch (error) {
     console.error('Database initialization failed:', error);

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import apiRequest from '../services/api';
+import apiRequest, { hunterApi } from '../services/api';
 import { ChartFrame } from '../components/charts/ChartFrame';
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
@@ -19,6 +19,7 @@ export default function InvestigatePage() {
   const [qna, setQna] = useState<{q: string; a?: string; evidence?: any}[]>([
     { q: '用户是否近期异常登录？', a: '在 55 分钟前出现非常规地点登录。' },
   ]);
+  const [digging, setDigging] = useState(false);
 
   const exfilData = useMemo(() => (
     [
@@ -45,8 +46,48 @@ export default function InvestigatePage() {
     })();
   }, [alertId]);
 
-  function digDeeper() {
-    setQna(prev => ([...prev, { q: 'Dig Deeper: 最近 2 小时同用户是否有提权事件？', a: '发现 1 次管理员组成员查询，暂无直接提权证据。' }]));
+  async function digDeeper() {
+    if (digging) return;
+    setDigging(true);
+    // Try AI to suggest a non-duplicate next question based on context; fallback to a rotating pool
+    const logs: string[] = [];
+    if (inv?.summary) logs.push(`SUMMARY: ${inv.summary}`);
+    if (timeline.length) logs.push(`TIMELINE:\n${timeline.slice(0, 6).map(t => `${t.ts} ${t.text}`).join('\n')}`);
+
+    const asked = new Set(qna.map(x => x.q));
+    let nextQ = '';
+    try {
+      const prompt = `基于以上上下文，提出一个全新的、未重复的下一步调查问题。只输出问题本身。已问：${Array.from(asked).join(' | ')}`;
+      const resp = await hunterApi.query(prompt, logs);
+      nextQ = (resp?.answer || '').trim();
+    } catch {}
+
+    if (!nextQ || asked.has(nextQ)) {
+      const pool = [
+        '是否存在可疑外联到非常规国家或高风险IP？',
+        '当前主机是否出现异常进程或父子进程关系？',
+        '账户是否在短时间内有多地登录或失败重试？',
+        '是否有持久化机制（计划任务/注册表/服务）迹象？',
+        '是否有批量文件外传或异常数据量峰值？',
+        '是否有新建高权限账户或组成员变更？',
+        'EDR/SIEM 中是否存在与该指纹相似的历史案例？'
+      ];
+      const candidate = pool.find(q => !asked.has(q));
+      nextQ = candidate || `${pool[0]} (${qna.length + 1})`;
+    }
+
+    let answer = '';
+    let evidence: any = undefined;
+    try {
+      const res = await hunterApi.query(nextQ, logs);
+      answer = (res?.answer || '').trim();
+      if (Array.isArray(res?.evidence) && res.evidence[0]) {
+        evidence = { type: 'log', content: res.evidence[0] };
+      }
+    } catch {}
+
+    setQna(prev => ([...prev, { q: nextQ, a: answer, evidence }]));
+    setDigging(false);
   }
 
   return (
@@ -72,7 +113,7 @@ export default function InvestigatePage() {
         <div className="bg-surface rounded-lg border border-border p-3 mb-3">
           <div className="flex items-center justify-between">
             <div className="font-semibold">问答卡片</div>
-            <button className="px-3 py-1.5 border border-border rounded-md" onClick={digDeeper}>Dig Deeper</button>
+            <button className="px-3 py-1.5 border border-border rounded-md disabled:opacity-60" disabled={digging} onClick={digDeeper}>{digging ? 'Thinking…' : 'Dig Deeper'}</button>
           </div>
           <div className="mt-2 space-y-2">
             {qna.map((it, i) => (

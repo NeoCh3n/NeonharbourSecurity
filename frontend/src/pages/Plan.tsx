@@ -82,9 +82,12 @@ export default function PlanPage({ alertIdOverride }: { alertIdOverride?: string
 
       <section className="bg-surface rounded-lg border border-border p-3 shadow-sm flex flex-wrap items-end gap-2">
         {alertIdOverride ? (
-          <div className="text-sm">
-            <span className="text-muted">Alert:</span> <span className="px-2 py-0.5 rounded bg-surfaceAlt border border-border">{alertId}</span>
-          </div>
+          <>
+            <div className="text-sm">
+              <span className="text-muted">Alert:</span> <span className="px-2 py-0.5 rounded bg-surfaceAlt border border-border">{alertId}</span>
+            </div>
+            <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => navigate(`/alert-workspace?alertId=${alertId}&tab=investigate`)} disabled={!alertId}>开始调查</button>
+          </>
         ) : (
           <>
             <div>
@@ -101,7 +104,7 @@ export default function PlanPage({ alertIdOverride }: { alertIdOverride?: string
               <input className="px-2 py-1.5 border border-border rounded-md" placeholder="如 123" value={alertId} onChange={e=>setAlertId(e.target.value)} />
             </div>
             <button className="px-3 py-1.5 border border-border rounded-md" onClick={loadPlan} disabled={!alertId || loading}>载入计划</button>
-            <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => navigate(`/investigate?alertId=${alertId}`)} disabled={!alertId}>开始调查</button>
+            <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => navigate(`/alert-workspace?alertId=${alertId}&tab=investigate`)} disabled={!alertId}>开始调查</button>
           </>
         )}
         <div className="ml-auto text-xs text-muted">{loading ? 'Loading…' : (plan ? 'AI 生成 / 可编辑' : '未载入')}</div>
@@ -136,6 +139,7 @@ export default function PlanPage({ alertIdOverride }: { alertIdOverride?: string
                 <div>Investigate: {plan?.investigate_start || '-'}</div>
                 <div>Resolve: {plan?.resolve_time || '-'}</div>
               </div>
+              <PlanNotesEditor alertId={alertId} planState={plan} setPlanState={setPlan} />
             </div>
           )}
         </div>
@@ -160,6 +164,39 @@ export default function PlanPage({ alertIdOverride }: { alertIdOverride?: string
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+function PlanNotesEditor({ alertId, planState, setPlanState }: { alertId: string; planState: any; setPlanState: (v: any) => void }) {
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  if (!alertId) return null;
+  async function save() {
+    if (!note.trim()) return;
+    setSaving(true);
+    try {
+      const current = planState?.plan || { steps: [], questions: [], notes: [] };
+      const notes = Array.isArray(current.notes) ? current.notes.slice() : [];
+      notes.push({ ts: new Date().toISOString(), answer: note });
+      const updated = { ...current, notes };
+      const r = await planApi.update(Number(alertId), { plan: updated });
+      setPlanState({ ...(planState || {}), plan: r.plan, ack_time: r.ack_time, investigate_start: r.investigate_start, resolve_time: r.resolve_time });
+      setNote('');
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <div className="mt-3">
+      <label className="block text-xs text-muted mb-1">笔记 / Findings</label>
+      <div className="flex items-start gap-2">
+        <textarea className="flex-1 px-2 py-1 border border-border rounded-md bg-surface text-sm" placeholder="记录你的发现或结论…" value={note} onChange={e=>setNote(e.target.value)} />
+        <button className="px-3 py-1.5 border border-border rounded-md disabled:opacity-60" disabled={saving || !note.trim()} onClick={save}>保存笔记</button>
+      </div>
+      {Array.isArray(planState?.plan?.notes) && planState.plan.notes.length>0 && (
+        <div className="text-xs text-muted mt-2">共 {planState.plan.notes.length} 条笔记</div>
+      )}
     </div>
   );
 }

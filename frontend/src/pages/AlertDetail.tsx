@@ -80,6 +80,7 @@ export default function AlertDetailPage() {
           ))}
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <a className="px-3 py-1.5 border border-border rounded-md" href={`/alert-workspace?alertId=${id}&tab=investigate`}>开始调查</a>
           <a className="px-3 py-1.5 border border-border rounded-md" href={`/alert-workspace?alertId=${id}`}>打开工作台</a>
         </div>
       </div>
@@ -172,4 +173,3 @@ export default function AlertDetailPage() {
     </div>
   );
 }
-

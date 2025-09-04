@@ -16,9 +16,7 @@ export default function InvestigatePage({ alertIdOverride }: { alertIdOverride?:
     { ts: new Date(Date.now()-48*60*1000).toISOString(), text: 'Suspicious outbound to 203.0.113.5:443', sev: 'Medium' },
   ]);
   const [inv, setInv] = useState<{ summary?: string; evidence?: any[] } | null>(null);
-  const [qna, setQna] = useState<{q: string; a?: string; evidence?: any}[]>([
-    { q: '用户是否近期异常登录？', a: '在 55 分钟前出现非常规地点登录。' },
-  ]);
+  const [qna, setQna] = useState<{q: string; a?: string; evidence?: any}[]>([]);
   const [digging, setDigging] = useState(false);
 
   const exfilData = useMemo(() => (

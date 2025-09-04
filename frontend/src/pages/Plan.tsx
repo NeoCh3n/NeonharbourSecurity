@@ -67,7 +67,7 @@ export default function PlanPage({ alertIdOverride }: { alertIdOverride?: string
   const questions: string[] = useMemo(() => (
     Array.isArray(plan?.plan?.questions) && plan.plan.questions.length
       ? plan.plan.questions
-      : ['这是否为真实威胁还是误报？', '哪些资产受到影响？', '是否存在持久化/横向渗透迹象？']
+      : []
   ), [plan]);
 
   const steps: Step[] = useMemo(() => (
@@ -114,14 +114,23 @@ export default function PlanPage({ alertIdOverride }: { alertIdOverride?: string
 
       <section className="grid grid-cols-12 gap-3">
         <div className="col-span-12 lg:col-span-8 space-y-2">
-          {questions.map((text, idx) => (
-            <div key={idx} className="bg-surface rounded-lg border border-border p-3">
+          {questions.length > 0 ? (
+            questions.map((text, idx) => (
+              <div key={idx} className="bg-surface rounded-lg border border-border p-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-medium">{text}</div>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-[#0f172a] text-muted border border-border">Ready</span>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="bg-surface rounded-lg border border-border p-3">
               <div className="flex items-center justify-between">
-                <div className="font-medium">{text}</div>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${plan ? 'bg-[#0f172a] text-muted border border-border' : 'bg-surfaceAlt'}`}>{plan ? 'Ready' : 'Planning…'}</span>
+                <div className="font-medium text-muted">Generating context-aware investigation questions…</div>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-surfaceAlt">Planning…</span>
               </div>
             </div>
-          ))}
+          )}
           {steps.length > 0 && (
             <div className="bg-surface rounded-lg border border-border p-3">
               <div className="text-muted text-sm mb-1">Steps</div>

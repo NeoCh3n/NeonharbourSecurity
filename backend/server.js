@@ -518,6 +518,58 @@ app.get('/metrics', authMiddleware, async (req, res) => {
   }
 });
 
+// Cases: list and detail (dedup/aggregation view)
+app.get('/cases', authMiddleware, async (req, res) => {
+  try {
+    const sql = `
+      SELECT c.id, c.severity, c.status, c.owner,
+             COALESCE(cnt.count, 0) AS alert_count,
+             COALESCE(lat.latest, c.created_at) AS latest
+      FROM cases c
+      LEFT JOIN (
+        SELECT case_id, COUNT(*) AS count FROM case_alerts GROUP BY case_id
+      ) cnt ON cnt.case_id = c.id
+      LEFT JOIN (
+        SELECT case_id, MAX(a.created_at) AS latest
+        FROM case_alerts ca JOIN alerts a ON a.id = ca.alert_id
+        WHERE a.user_id = $1
+        GROUP BY case_id
+      ) lat ON lat.case_id = c.id
+      ORDER BY COALESCE(latest, c.created_at) DESC, c.id DESC`;
+    const r = await pool.query(sql, [req.user.id]);
+    res.json({ cases: r.rows });
+  } catch (error) {
+    console.error('Error fetching cases:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/cases/:id', authMiddleware, async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  try {
+    const caseRow = await pool.query('SELECT id, severity, status, owner, context, created_at FROM cases WHERE id=$1', [caseId]);
+    if (caseRow.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const alertsSql = `
+      SELECT a.id, a.created_at, a.severity, a.status, a.summary, a.fingerprint, a.source, a.entities
+      FROM case_alerts ca JOIN alerts a ON a.id = ca.alert_id
+      WHERE ca.case_id = $1 AND a.user_id = $2
+      ORDER BY a.created_at DESC`;
+    const alerts = await pool.query(alertsSql, [caseId, req.user.id]);
+    // Aggregate impacted entities for convenience
+    const impacted = new Set();
+    for (const row of alerts.rows) {
+      try {
+        const ents = Array.isArray(row.entities) ? row.entities : JSON.parse(row.entities || '[]');
+        ents.slice(0, 20).forEach(e => impacted.add(`${e.type}:${e.value}`));
+      } catch {}
+    }
+    res.json({ case: caseRow.rows[0], alerts: alerts.rows, impacted: Array.from(impacted).slice(0, 100) });
+  } catch (error) {
+    console.error('Error fetching case detail:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

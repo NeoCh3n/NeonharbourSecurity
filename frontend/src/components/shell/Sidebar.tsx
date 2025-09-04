@@ -16,6 +16,12 @@ export function Sidebar() {
             </NavLink>
           </li>
           <li>
+            <NavLink to="/cases" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
+              <span>🗂️</span>
+              {expanded && <span>案件</span>}
+            </NavLink>
+          </li>
+          <li>
             <NavLink to="/hunt" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
               <span>🧭</span>
               {expanded && <span>Hunt</span>}

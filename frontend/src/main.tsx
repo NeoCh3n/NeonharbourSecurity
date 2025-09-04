@@ -16,6 +16,8 @@ import IngestPage from './pages/Ingest.tsx';
 import AlertsListPage from './pages/AlertsList.tsx';
 import AlertWorkspacePage from './pages/AlertWorkspace.tsx';
 import AlertDetailPage from './pages/AlertDetail.tsx';
+import CasesPage from './pages/Cases.tsx';
+import CaseDetailPage from './pages/CaseDetail.tsx';
 import { ThemeProvider } from './store/theme';
 import { worker } from './mocks/browser';
 
@@ -37,6 +39,8 @@ const router = createBrowserRouter([
       { path: 'report', element: <ReportPage /> },
       { path: 'hunt', element: <ThreatHunterPage /> },
       { path: 'alert-workspace', element: <AlertWorkspacePage /> },
+      { path: 'cases', element: <CasesPage /> },
+      { path: 'cases/:id', element: <CaseDetailPage /> },
       { path: 'ingest', element: <IngestPage /> },
       { path: 'alerts-list', element: <AlertsListPage /> }
       ,{ path: 'alerts/:id', element: <AlertDetailPage /> }

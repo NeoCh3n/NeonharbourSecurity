@@ -7,7 +7,7 @@ const { parse: csvParse } = require('csv-parse/sync');
 const path = require('path');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { analyzeAlert, hunterQuery } = require('./ai');
+const { analyzeAlert, hunterQuery, mapMitre } = require('./ai');
 const { pool, initDatabase } = require('./database');
 
 const app = express();
@@ -155,21 +155,33 @@ async function processAlertsForUser(alertObjs, userId) {
         caseId = await upsertCaseForFingerprint(unified.fingerprint, unified.severity || 'low');
       }
       const plan = generatePlan(unified, analysis);
+      // MITRE ATT&CK mapping via AI
+      let mitre = null; let tactic = null; let techniqueStr = unified.technique || null;
+      try {
+        mitre = await mapMitre(unified);
+        if (mitre && Array.isArray(mitre.techniques) && mitre.techniques[0]) {
+          const t0 = mitre.techniques[0];
+          techniqueStr = t0.id ? `${t0.id} ${t0.name||''}`.trim() : (t0.name || techniqueStr);
+        }
+        if (mitre && Array.isArray(mitre.tactics) && mitre.tactics[0]) tactic = mitre.tactics[0].id || mitre.tactics[0].name || null;
+      } catch {}
       const recommendations = generateRecommendations(unified);
       const result = await pool.query(
         `INSERT INTO alerts (
            source, status, summary, severity, category, action, technique, confidence,
+           tactic,
            principal, asset, entities, fingerprint, case_id, plan, recommendations,
            ack_time, investigate_start, resolve_time,
            embedding, embedding_text, embedding_vec,
-           timeline, evidence, analysis_time, raw, user_id
+           mitre, timeline, evidence, analysis_time, raw, user_id
          ) VALUES (
            $1,$2,$3,$4,$5,$6,$7,$8,
-           $9,$10,$11,$12,$13,$14,$15,
-           $16,$17,$18,
-           $19,$20,
-           $21,$22,$23,
-           $24,$25,$26,$27,$28
+           $9,
+           $10,$11,$12,$13,$14,$15,$16,
+           $17,$18,$19,
+           $20,$21,
+           $22,$23,$24,
+           $25,$26,$27,$28,$29
          ) RETURNING id, created_at, source, status, summary, severity`,
         [
           unified.source || 'ingest',
@@ -178,8 +190,9 @@ async function processAlertsForUser(alertObjs, userId) {
           analysis.severity || unified.severity || 'low',
           unified.category || null,
           unified.action || null,
-          unified.technique || null,
+          techniqueStr || null,
           typeof unified.confidence === 'number' ? unified.confidence : null,
+          tactic || null,
           JSON.stringify(unified.principal || {}),
           JSON.stringify(unified.asset || {}),
           JSON.stringify(unified.entities || []),
@@ -193,6 +206,7 @@ async function processAlertsForUser(alertObjs, userId) {
           unified.embedding ? JSON.stringify(unified.embedding) : null,
           unified.embeddingText || null,
           Array.isArray(unified.embedding?.vec) ? `[${unified.embedding.vec.join(',')}]` : null,
+          mitre ? JSON.stringify(mitre) : null,
           timelineJson,
           evidenceJson,
           analysis.analysisTime,
@@ -280,6 +294,7 @@ app.get('/alerts/:id', authMiddleware, async (req, res) => {
     row.evidence = parseJsonMaybe(row.evidence, []);
     row.raw = parseJsonMaybe(row.raw, {});
     row.plan = parseJsonMaybe(row.plan, {});
+    row.mitre = parseJsonMaybe(row.mitre, {});
     row.recommendations = parseJsonMaybe(row.recommendations, []);
     res.json(row);
   } catch (error) {
@@ -315,6 +330,7 @@ app.get('/alerts/:id/plan', authMiddleware, async (req, res) => {
     if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const row = r.rows[0];
     row.plan = parseJsonMaybe(row.plan, {});
+    row.mitre = parseJsonMaybe(row.mitre, {});
     row.recommendations = parseJsonMaybe(row.recommendations, []);
     res.json(row);
   } catch (error) {
@@ -352,6 +368,7 @@ app.post('/alerts/:id/plan', authMiddleware, async (req, res) => {
     );
     const row = upd.rows[0];
     row.plan = parseJsonMaybe(row.plan, {});
+    row.mitre = parseJsonMaybe(row.mitre, {});
     res.json(row);
   } catch (error) {
     console.error('Error updating plan:', error);

@@ -11,6 +11,7 @@ export default function AlertDetailPage() {
   const [error, setError] = useState<string>('');
   const [actionMsg, setActionMsg] = useState<string>('');
   const [pendingAction, setPendingAction] = useState<string>('');
+  const mitre = detail?.mitre || null;
 
   async function loadAll() {
     if (!id) return;
@@ -154,6 +155,33 @@ export default function AlertDetailPage() {
             <section className="bg-surface rounded-lg border border-border p-3">
               <div className="font-semibold mb-1">Entities</div>
               <pre className="mt-1 p-2 bg-surfaceAlt rounded-md overflow-auto text-xs max-h-[260px]">{JSON.stringify(detail.entities, null, 2)}</pre>
+            </section>
+
+            <section className="bg-surface rounded-lg border border-border p-3">
+              <div className="font-semibold mb-2">MITRE ATT&CK</div>
+              {mitre ? (
+                <div className="text-sm">
+                  {Array.isArray(mitre.tactics) && mitre.tactics.length>0 && (
+                    <div className="mb-2">
+                      <div className="text-muted text-xs">Tactics</div>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {mitre.tactics.slice(0,4).map((t:any,i:number)=>(<span key={i} className="px-2 py-0.5 rounded bg-surfaceAlt border border-border">{t.id || t.name} {t.confidence!=null?`(${Math.round(t.confidence*100)}%)`:''}</span>))}
+                      </div>
+                    </div>
+                  )}
+                  {Array.isArray(mitre.techniques) && mitre.techniques.length>0 && (
+                    <div>
+                      <div className="text-muted text-xs">Techniques</div>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {mitre.techniques.slice(0,6).map((t:any,i:number)=>(<span key={i} className="px-2 py-0.5 rounded bg-surfaceAlt border border-border">{t.id || t.name} {t.confidence!=null?`(${Math.round(t.confidence*100)}%)`:''}</span>))}
+                      </div>
+                    </div>
+                  )}
+                  {mitre.rationale && <div className="text-xs text-muted mt-2">{mitre.rationale}</div>}
+                </div>
+              ) : (
+                <div className="text-sm text-muted">No MITRE mapping.</div>
+              )}
             </section>
 
             <section className="bg-surface rounded-lg border border-border p-3">

@@ -195,3 +195,36 @@ async function hunterQuery(question, logs = []) {
 }
 
 module.exports = { analyzeAlert, hunterQuery };
+
+/**
+ * Map a unified alert to MITRE ATT&CK tactics/techniques using the AI model.
+ * Returns an object like:
+ * { tactics: [{ id, name, confidence }], techniques: [{ id, name, confidence }], confidence, rationale }
+ */
+async function mapMitre(unified) {
+  try {
+    const text = JSON.stringify(unified);
+    const prompt = `You are a SOC analyst. Map the following alert to MITRE ATT&CK.
+Return ONLY strict JSON with keys: tactics (array of {id,name,confidence}), techniques (array of {id,name,confidence}), confidence (0-1), rationale (string).
+If uncertain, still provide best-guess with lower confidence. Alert JSON: ${text}`;
+    const aiResp = await callModel([
+      { role: 'system', content: 'You output only strict JSON. No prose.' },
+      { role: 'user', content: prompt }
+    ]);
+    if (!aiResp) return null;
+    try {
+      const cleaned = aiResp.replace(/```json
+?|```/g, '').trim();
+      const obj = JSON.parse(cleaned);
+      obj.tactics = Array.isArray(obj.tactics) ? obj.tactics : [];
+      obj.techniques = Array.isArray(obj.techniques) ? obj.techniques : [];
+      return obj;
+    } catch (e) {
+      return null;
+    }
+  } catch (e) {
+    return null;
+  }
+}
+
+module.exports = Object.assign(module.exports || {}, { mapMitre });

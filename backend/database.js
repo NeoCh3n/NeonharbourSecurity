@@ -27,6 +27,7 @@ async function initDatabase() {
         category VARCHAR(50),
         action VARCHAR(100),
         technique VARCHAR(100),
+        tactic VARCHAR(100),
         confidence REAL,
         principal JSONB,
         asset JSONB,
@@ -40,6 +41,7 @@ async function initDatabase() {
         resolve_time TIMESTAMP,
         embedding JSONB,
         embedding_text TEXT,
+        mitre JSONB,
         timeline JSONB,
         evidence JSONB,
         analysis_time INTEGER,
@@ -100,6 +102,7 @@ async function initDatabase() {
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS category VARCHAR(50)",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS action VARCHAR(100)",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS technique VARCHAR(100)",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS tactic VARCHAR(100)",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS confidence REAL",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS principal JSONB",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS asset JSONB",
@@ -112,7 +115,8 @@ async function initDatabase() {
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS investigate_start TIMESTAMP",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS resolve_time TIMESTAMP",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS embedding JSONB",
-      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS embedding_text TEXT"
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS embedding_text TEXT",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS mitre JSONB"
     ];
     for (const sql of alterSqls) {
       try { await pool.query(sql); } catch {}

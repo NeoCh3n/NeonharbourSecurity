@@ -523,19 +523,19 @@ app.get('/cases', authMiddleware, async (req, res) => {
   try {
     const sql = `
       SELECT c.id, c.severity, c.status, c.owner,
-             COALESCE(cnt.count, 0) AS alert_count,
+             COALESCE(cnt.total, 0) AS alert_count,
              COALESCE(lat.latest, c.created_at) AS latest
       FROM cases c
       LEFT JOIN (
-        SELECT case_id, COUNT(*) AS count FROM case_alerts GROUP BY case_id
+        SELECT case_id, COUNT(*) AS total FROM case_alerts GROUP BY case_id
       ) cnt ON cnt.case_id = c.id
       LEFT JOIN (
-        SELECT case_id, MAX(a.created_at) AS latest
+        SELECT ca.case_id, MAX(a.created_at) AS latest
         FROM case_alerts ca JOIN alerts a ON a.id = ca.alert_id
         WHERE a.user_id = $1
-        GROUP BY case_id
+        GROUP BY ca.case_id
       ) lat ON lat.case_id = c.id
-      ORDER BY COALESCE(latest, c.created_at) DESC, c.id DESC`;
+      ORDER BY COALESCE(lat.latest, c.created_at) DESC, c.id DESC`;
     const r = await pool.query(sql, [req.user.id]);
     res.json({ cases: r.rows });
   } catch (error) {

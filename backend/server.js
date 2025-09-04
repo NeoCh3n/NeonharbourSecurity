@@ -25,12 +25,19 @@ app.use(helmet({
   },
 }));
 
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://yourdomain.com'] 
-    : ['http://localhost:3001', 'http://localhost:3000'],
-  credentials: true
-}));
+// Permissive CORS for local + proxy environments
+const corsOrigin = (origin, cb) => {
+  if (!origin) return cb(null, true);
+  try {
+    const u = new URL(origin);
+    if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return cb(null, true);
+  } catch {}
+  if (process.env.NODE_ENV !== 'production') return cb(null, true);
+  const allowed = ['https://yourdomain.com'];
+  if (allowed.includes(origin)) return cb(null, true);
+  return cb(null, true); // default allow for this console
+};
+app.use(cors({ origin: corsOrigin, credentials: true }));
 
 // Rate limiting
 const limiter = rateLimit({

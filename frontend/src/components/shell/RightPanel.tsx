@@ -5,7 +5,7 @@ export function RightPanel() {
   return (
     <aside className="w-[320px] bg-surface border-l border-border min-h-[calc(100vh-56px)] p-3">
       <div className="flex items-center justify-between mb-2">
-        <div className="font-semibold">上下文面板</div>
+        <div className="font-semibold">Context Panel</div>
         <button className="text-muted hover:text-text" onClick={() => setOpen(false)}>✕</button>
       </div>
       <div className="space-y-3 text-sm">

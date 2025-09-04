@@ -31,8 +31,8 @@ export default function AlertsListPage() {
   return (
     <div className="space-y-3">
       <div className="bg-surface rounded-lg border border-border p-3 shadow-sm flex items-center justify-between">
-        <div className="font-semibold">告警列表 / Alerts</div>
-        <div className="text-sm text-muted">最近写入将显示在最前</div>
+        <div className="font-semibold">Alerts</div>
+        <div className="text-sm text-muted">Newest appear on top</div>
       </div>
       {error && <div className="text-danger text-sm" role="alert">{error}</div>}
       <div className="bg-surface rounded-lg border border-border overflow-auto">
@@ -40,11 +40,11 @@ export default function AlertsListPage() {
           <thead className="bg-surfaceAlt">
             <tr>
               <th className="text-left px-3 py-2 border-b border-border">ID</th>
-              <th className="text-left px-3 py-2 border-b border-border">时间</th>
-              <th className="text-left px-3 py-2 border-b border-border">来源</th>
-              <th className="text-left px-3 py-2 border-b border-border">状态</th>
-              <th className="text-left px-3 py-2 border-b border-border">严重度</th>
-              <th className="text-left px-3 py-2 border-b border-border">操作</th>
+              <th className="text-left px-3 py-2 border-b border-border">Time</th>
+              <th className="text-left px-3 py-2 border-b border-border">Source</th>
+              <th className="text-left px-3 py-2 border-b border-border">Status</th>
+              <th className="text-left px-3 py-2 border-b border-border">Severity</th>
+              <th className="text-left px-3 py-2 border-b border-border">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -56,18 +56,18 @@ export default function AlertsListPage() {
                 <td className="px-3 py-2">{r.status}</td>
                 <td className="px-3 py-2">{r.severity}</td>
                 <td className="px-3 py-2 flex gap-2">
-                  <button className="px-2 py-1 border border-border rounded-md" onClick={() => openDetail(r.id)}>详情</button>
-                  <a className="px-2 py-1 border border-border rounded-md" href={`/alert-workspace?alertId=${r.id}`}>工作台</a>
+                  <button className="px-2 py-1 border border-border rounded-md btn-gradient" onClick={() => openDetail(r.id)}>View</button>
+                  <a className="px-2 py-1 border border-border rounded-md" href={`/alert-workspace?alertId=${r.id}`}>Workspace</a>
                 </td>
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td className="px-3 py-4 text-muted" colSpan={6}>暂无数据 / No alerts</td></tr>
+              <tr><td className="px-3 py-4 text-muted" colSpan={6}>No alerts</td></tr>
             )}
           </tbody>
         </table>
       </div>
-      <div className="text-xs text-muted">提示：最新写入显示在最前。如看不到新数据，请刷新或重新拉取。</div>
+      <div className="text-xs text-muted">Tip: Newest alerts are shown first. Refresh if you don't see recent data.</div>
       {/* Detailed view moved to dedicated page for modern UI with skeletons and actions */}
     </div>
   );

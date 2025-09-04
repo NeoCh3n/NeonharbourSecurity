@@ -67,18 +67,18 @@ export default function DashboardPage() {
   return (
     <div className="space-y-4">
       <section className="bg-surface rounded-lg border border-border p-3 shadow-sm flex items-center gap-2">
-        <span className="text-sm text-muted">全局过滤：</span>
-        <select aria-label="时间范围" className="border border-border rounded-md px-2 py-1 bg-surface text-text">
-          <option>近 30 天</option>
-          <option>近 7 天</option>
-          <option>近 90 天</option>
+        <span className="text-sm text-muted">Global filter:</span>
+        <select aria-label="Time range" className="border border-border rounded-md px-2 py-1 bg-surface text-text">
+          <option>Last 30 days</option>
+          <option>Last 7 days</option>
+          <option>Last 90 days</option>
         </select>
-        <button className="ml-auto px-3 py-1.5 border border-border rounded-md" onClick={() => setRight(true)}>打开情报侧栏</button>
+        <button className="ml-auto px-3 py-1.5 border border-border rounded-md" onClick={() => setRight(true)}>Open Intel Panel</button>
       </section>
 
       {unauthorized && (
         <div role="alert" className="bg-surface rounded-lg border border-border p-3 text-sm">
-          未登录或令牌失效。请前往“验证/写入”完成登录：菜单 → 验证/写入。
+          Not signed in or token expired. Please sign in via Menu → Data Sources.
         </div>
       )}
 
@@ -93,7 +93,7 @@ export default function DashboardPage() {
 
       <section className="grid grid-cols-12 gap-3">
         <div className="col-span-12 lg:col-span-7">
-          <ChartFrame title="告警趋势（近 30 天）">
+          <ChartFrame title="Alert Trend (Last 30 days)">
             <ResponsiveContainer width="100%" height="100%">
               {alertsQ.isLoading ? (
                 <ChartSkeleton />
@@ -115,7 +115,7 @@ export default function DashboardPage() {
           </ChartFrame>
         </div>
         <div className="col-span-12 lg:col-span-5">
-          <ChartFrame title="严重度分布">
+          <ChartFrame title="Severity Distribution">
             <ResponsiveContainer width="100%" height="100%">
               {metricsQ.isLoading ? (
                 <ChartSkeleton />
@@ -135,7 +135,7 @@ export default function DashboardPage() {
 
       <section className="grid grid-cols-12 gap-3">
         <div className="col-span-12 lg:col-span-6">
-          <ChartFrame title="状态分布">
+          <ChartFrame title="Status Distribution">
             <ResponsiveContainer width="100%" height="100%">
               {metricsQ.isLoading ? (
                 <ChartSkeleton />

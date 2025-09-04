@@ -18,7 +18,7 @@ export function Sidebar() {
           <li>
             <NavLink to="/cases" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
               <span>🗂️</span>
-              {expanded && <span>案件</span>}
+              {expanded && <span>Cases</span>}
             </NavLink>
           </li>
           <li>
@@ -30,13 +30,13 @@ export function Sidebar() {
           <li>
             <NavLink to="/ingest" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
               <span>🔌</span>
-              {expanded && <span>数据源</span>}
+              {expanded && <span>Data Sources</span>}
             </NavLink>
           </li>
           <li>
             <NavLink to="/alerts-list" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
               <span>📄</span>
-              {expanded && <span>告警列表</span>}
+              {expanded && <span>Alerts</span>}
             </NavLink>
           </li>
         </ul>

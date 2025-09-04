@@ -10,10 +10,10 @@ export default function InvestigatePage({ alertIdOverride }: { alertIdOverride?:
   const [params] = useSearchParams();
   const alertId = alertIdOverride || params.get('alertId');
   const [timeline, setTimeline] = useState<Event[]>([
-    { ts: new Date(Date.now()-60*60*1000).toISOString(), text: '成功登录 azure – alice', sev: 'Low' },
-    { ts: new Date(Date.now()-55*60*1000).toISOString(), text: '非常规地点登录 – 香港 -> 新加坡', sev: 'Medium' },
-    { ts: new Date(Date.now()-50*60*1000).toISOString(), text: '主机 hk-core-srv-12 执行 powershell.exe', sev: 'High' },
-    { ts: new Date(Date.now()-48*60*1000).toISOString(), text: '可疑外联到 203.0.113.5:443', sev: 'Medium' },
+    { ts: new Date(Date.now()-60*60*1000).toISOString(), text: 'Successful login to Azure – alice', sev: 'Low' },
+    { ts: new Date(Date.now()-55*60*1000).toISOString(), text: 'Atypical location login – HK -> SG', sev: 'Medium' },
+    { ts: new Date(Date.now()-50*60*1000).toISOString(), text: 'Host hk-core-srv-12 ran powershell.exe', sev: 'High' },
+    { ts: new Date(Date.now()-48*60*1000).toISOString(), text: 'Suspicious outbound to 203.0.113.5:443', sev: 'Medium' },
   ]);
   const [inv, setInv] = useState<{ summary?: string; evidence?: any[] } | null>(null);
   const [qna, setQna] = useState<{q: string; a?: string; evidence?: any}[]>([
@@ -57,20 +57,20 @@ export default function InvestigatePage({ alertIdOverride }: { alertIdOverride?:
     const asked = new Set(qna.map(x => x.q));
     let nextQ = '';
     try {
-      const prompt = `基于以上上下文，提出一个全新的、未重复的下一步调查问题。只输出问题本身。已问：${Array.from(asked).join(' | ')}`;
+      const prompt = `Given the context, propose a new, non-repeating next investigation question. Output only the question. Already asked: ${Array.from(asked).join(' | ')}`;
       const resp = await hunterApi.query(prompt, logs);
       nextQ = (resp?.answer || '').trim();
     } catch {}
 
     if (!nextQ || asked.has(nextQ)) {
       const pool = [
-        '是否存在可疑外联到非常规国家或高风险IP？',
-        '当前主机是否出现异常进程或父子进程关系？',
-        '账户是否在短时间内有多地登录或失败重试？',
-        '是否有持久化机制（计划任务/注册表/服务）迹象？',
-        '是否有批量文件外传或异常数据量峰值？',
-        '是否有新建高权限账户或组成员变更？',
-        'EDR/SIEM 中是否存在与该指纹相似的历史案例？'
+        'Any suspicious outbound to unusual geo or risky IPs?',
+        'Does the host show anomalous processes or parent-child chains?',
+        'Any multi-geo logins or repeated failures for the account?',
+        'Any persistence indicators (scheduled tasks/registry/services)?',
+        'Any bulk data exfiltration or abnormal volume spikes?',
+        'Any newly created privileged accounts or group changes?',
+        'Any similar historical cases in EDR/SIEM for this fingerprint?'
       ];
       const candidate = pool.find(q => !asked.has(q));
       nextQ = candidate || `${pool[0]} (${qna.length + 1})`;
@@ -93,7 +93,7 @@ export default function InvestigatePage({ alertIdOverride }: { alertIdOverride?:
   return (
     <div className="grid grid-cols-12 gap-3">
       <div className="col-span-12 bg-surface rounded-lg border border-border p-3 text-sm text-muted">
-        Investigate：左侧时间线，中部问答卡片与事件摘要，右侧图表/表格。可使用 “Dig Deeper” 追加问题或跨案联动。
+        Investigate: Left timeline, center Q&A with summary, right charts/table. Use “Dig Deeper” to add context-aware questions.
       </div>
       <div className="col-span-12 lg:col-span-3 bg-surface rounded-lg border border-border p-3">
         <div className="font-semibold mb-2">时间线</div>
@@ -112,7 +112,7 @@ export default function InvestigatePage({ alertIdOverride }: { alertIdOverride?:
       <div className="col-span-12 lg:col-span-6">
         <div className="bg-surface rounded-lg border border-border p-3 mb-3">
           <div className="flex items-center justify-between">
-            <div className="font-semibold">问答卡片</div>
+            <div className="font-semibold">Q&A Cards</div>
             <button className="px-3 py-1.5 border border-border rounded-md disabled:opacity-60" disabled={digging} onClick={digDeeper}>{digging ? 'Thinking…' : 'Dig Deeper'}</button>
           </div>
           <div className="mt-2 space-y-2">
@@ -126,14 +126,14 @@ export default function InvestigatePage({ alertIdOverride }: { alertIdOverride?:
           </div>
         </div>
         <div className="bg-surface rounded-lg border border-border p-3">
-          <div className="font-semibold mb-1">事件摘要</div>
-          <div className="text-sm text-muted">跨源检索与关联后的关键事件摘要。</div>
+          <div className="font-semibold mb-1">Summary</div>
+          <div className="text-sm text-muted">Key findings after cross-source correlation.</div>
           {inv?.summary && <div className="mt-2 text-sm">{inv.summary}</div>}
           {inv?.evidence && <pre className="mt-2 text-xs bg-surfaceAlt rounded-md p-2 overflow-auto">{JSON.stringify(inv.evidence, null, 2)}</pre>}
         </div>
       </div>
       <div className="col-span-12 lg:col-span-3 space-y-3">
-        <ChartFrame title="潜在外泄动作（HTTP Methods）">
+        <ChartFrame title="Potential Exfiltration (HTTP Methods)">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={exfilData}>
               <XAxis dataKey="name" />
@@ -144,8 +144,8 @@ export default function InvestigatePage({ alertIdOverride }: { alertIdOverride?:
           </ResponsiveContainer>
         </ChartFrame>
         <div className="bg-surface rounded-lg border border-border p-3">
-          <div className="font-semibold mb-2">事件表格</div>
-          <div className="text-sm text-muted">右侧区域用于呈现关键事件明细（可导出）。</div>
+          <div className="font-semibold mb-2">Events Table</div>
+          <div className="text-sm text-muted">Use this panel to render key event details and export.</div>
         </div>
       </div>
     </div>

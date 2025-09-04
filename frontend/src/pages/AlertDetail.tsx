@@ -72,16 +72,16 @@ export default function AlertDetailPage() {
   return (
     <div className="space-y-3">
       <div className="bg-surface rounded-lg border border-border p-3 flex items-center gap-3 sticky top-0 z-10">
-        <button className="px-3 py-1.5 border border-border rounded-md" onClick={()=>navigate('/alerts-list')}>返回列表</button>
-        <div className="font-semibold">告警详情 #{id}</div>
+        <button className="px-3 py-1.5 border border-border rounded-md" onClick={()=>navigate('/alerts-list')}>Back to Alerts</button>
+        <div className="font-semibold">Alert Detail #{id}</div>
         <div className="flex items-center gap-2 text-xs ml-2">
           {headerChips.map((c,i)=>(
             <span key={i} className="px-2 py-0.5 rounded bg-surfaceAlt border border-border">{c.label}: {c.value}</span>
           ))}
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <a className="px-3 py-1.5 border border-border rounded-md" href={`/alert-workspace?alertId=${id}&tab=investigate`}>开始调查</a>
-          <a className="px-3 py-1.5 border border-border rounded-md" href={`/alert-workspace?alertId=${id}`}>打开工作台</a>
+          <a className="px-3 py-1.5 border border-border rounded-md btn-gradient" href={`/alert-workspace?alertId=${id}&tab=investigate`}>Start Investigate</a>
+          <a className="px-3 py-1.5 border border-border rounded-md" href={`/alert-workspace?alertId=${id}`}>Open Workspace</a>
         </div>
       </div>
 
@@ -104,12 +104,12 @@ export default function AlertDetailPage() {
         <div className="grid grid-cols-12 gap-3">
           <div className="col-span-12 lg:col-span-8 space-y-3">
             <section className="bg-surface rounded-lg border border-border p-3">
-              <div className="font-semibold mb-1">摘要 / Summary</div>
+              <div className="font-semibold mb-1">Summary</div>
               <div className="text-sm text-muted">{detail.summary || '—'}</div>
             </section>
 
             <section className="bg-surface rounded-lg border border-border p-3">
-              <div className="font-semibold mb-2">时间线 / Timeline</div>
+              <div className="font-semibold mb-2">Timeline</div>
               {Array.isArray(detail.timeline) && detail.timeline.length > 0 ? (
                 <ul className="text-sm space-y-2">
                   {detail.timeline.map((t:any,i:number)=>(
@@ -125,7 +125,7 @@ export default function AlertDetailPage() {
             </section>
 
             <section className="bg-surface rounded-lg border border-border p-3">
-              <div className="font-semibold">计划 / Plan（AI 生成）</div>
+              <div className="font-semibold">Plan (AI generated)</div>
               {plan ? (
                 <div className="mt-2">
                   <div className="text-sm text-muted">步骤 / Steps</div>
@@ -152,16 +152,16 @@ export default function AlertDetailPage() {
 
           <div className="col-span-12 lg:col-span-4 space-y-3">
             <section className="bg-surface rounded-lg border border-border p-3">
-              <div className="font-semibold mb-1">实体 / Entities</div>
+              <div className="font-semibold mb-1">Entities</div>
               <pre className="mt-1 p-2 bg-surfaceAlt rounded-md overflow-auto text-xs max-h-[260px]">{JSON.stringify(detail.entities, null, 2)}</pre>
             </section>
 
             <section className="bg-surface rounded-lg border border-border p-3">
-              <div className="font-semibold mb-2">建议 / Recommendations</div>
+              <div className="font-semibold mb-2">Recommendations</div>
               <div className="flex flex-wrap gap-2 text-sm">
                 {(detail.recommendations || []).map((r: any) => (
                   <button key={r.id} className="px-2 py-1 border border-border rounded-md disabled:opacity-60" disabled={pendingAction===r.id} onClick={() => requestAction(r.id)}>
-                    {pendingAction===r.id ? '提交中…' : r.title}
+                    {pendingAction===r.id ? 'Submitting…' : r.title}
                   </button>
                 ))}
               </div>

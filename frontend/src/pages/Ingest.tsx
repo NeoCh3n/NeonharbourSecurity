@@ -14,7 +14,7 @@ export default function IngestPage() {
 
   useEffect(() => {
     const t = localStorage.getItem('token');
-    if (t) setStatus('已登录 / Token present');
+    if (t) setStatus('Signed in / Token present');
     // Load integrations if logged in
     if (t) {
       integrationsApi.get().then(d => setIntegrations(d.integrations || [])).catch(()=>{});
@@ -23,13 +23,13 @@ export default function IngestPage() {
 
   async function ensureLogin() {
     setBusy(true);
-    setStatus('登录中 / Signing in...');
+    setStatus('Signing in...');
     try {
       try {
         const r = await authApi.login(email, password);
         if (r?.token) {
           localStorage.setItem('token', r.token);
-          setStatus('登录成功 / Signed in');
+          setStatus('Signed in');
           setBusy(false);
           return true;
         }
@@ -40,12 +40,12 @@ export default function IngestPage() {
           const r2 = await authApi.login(email, password);
           if (r2?.token) {
             localStorage.setItem('token', r2.token);
-            setStatus('已注册并登录 / Registered & signed in');
+            setStatus('Registered & signed in');
             setBusy(false);
             return true;
           }
         } catch (e2: any) {
-          setStatus('登录失败 / Sign-in failed');
+          setStatus('Sign-in failed');
           setBusy(false);
           return false;
         }
@@ -54,7 +54,7 @@ export default function IngestPage() {
       setBusy(false);
     }
     setBusy(false);
-    setStatus('登录失败 / Sign-in failed');
+    setStatus('Sign-in failed');
     return false;
   }
 
@@ -62,7 +62,7 @@ export default function IngestPage() {
     const ok = await ensureLogin();
     if (!ok) return;
     setBusy(true);
-    setStatus('写入样例告警 / Ingesting samples...');
+    setStatus('Ingesting sample alerts...');
     try {
       const samples = [
         { source: 'splunk', _time: new Date().toISOString(), user: 'bob', src_ip: '203.0.113.5', action: 'login_success', app: 'okta' },
@@ -71,9 +71,9 @@ export default function IngestPage() {
       ];
       const resp = await apiRequest('/alerts/ingest', { method: 'POST', body: JSON.stringify(samples) });
       const count = Array.isArray(resp.alerts) ? resp.alerts.length : 0;
-      setStatus(`写入完成 / Ingested ${count} alerts`);
+      setStatus(`Ingested ${count} alerts`);
     } catch (e: any) {
-      setStatus(`写入失败 / Ingest failed: ${e?.message || e}`);
+      setStatus(`Ingest failed: ${e?.message || e}`);
     } finally {
       setBusy(false);
     }
@@ -88,7 +88,7 @@ export default function IngestPage() {
   return (
     <div className="space-y-3">
       <div className="bg-surface rounded-lg border border-border p-3 shadow-sm">
-        <div className="text-sm text-muted mb-2">浏览器内验证 / In-Browser Validation</div>
+        <div className="text-sm text-muted mb-2">In-Browser Validation</div>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-sm text-muted mb-1">Email</label>
@@ -100,34 +100,34 @@ export default function IngestPage() {
           </div>
         </div>
         <div className="mt-3 flex gap-2">
-          <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={ensureLogin}>登录/注册</button>
-          <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={ingestSamples}>写入样例告警</button>
-          <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={viewAlerts}>查看告警列表</button>
+          <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md btn-gradient" onClick={ensureLogin}>Sign in / Register</button>
+          <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={ingestSamples}>Ingest Samples</button>
+          <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={viewAlerts}>View Alerts</button>
         </div>
         <div className="text-sm text-muted mt-2">{status}</div>
       </div>
       <div className="bg-surface rounded-lg border border-border p-3">
-        <div className="font-semibold mb-2">数据源接入控制面板</div>
-        <div className="text-sm text-muted mb-2">选择要接入的只读数据源（Sentinel / Splunk / Defender / CrowdStrike / Entra / Okta / CloudTrail & GuardDuty / Wiz / Email Security 等）。保存后将记录到审计日志。</div>
+        <div className="font-semibold mb-2">Data Source Control Panel</div>
+        <div className="text-sm text-muted mb-2">Choose which read-only sources to connect (Sentinel / Splunk / Defender / CrowdStrike / Entra / Okta / CloudTrail & GuardDuty / Wiz / Email Security). Saving writes to the audit log.</div>
         <IntegrationsEditor items={integrations} onChange={setIntegrations} />
         <div className="mt-3">
           <button disabled={savingIntegrations} className="px-3 py-1.5 border border-border rounded-md" onClick={async ()=>{
             const ok = await ensureLogin();
-            if (!ok) { setStatus('未登录，无法保存'); return; }
+            if (!ok) { setStatus('Not signed in, cannot save'); return; }
             setSavingIntegrations(true);
             try {
               await integrationsApi.save(integrations);
-              setStatus('已保存数据源设置');
+              setStatus('Data source settings saved');
             } catch (e: any) {
-              setStatus('保存失败: ' + (e?.message || e));
+              setStatus('Save failed: ' + (e?.message || e));
             } finally {
               setSavingIntegrations(false);
             }
-          }}>保存</button>
+          }}>Save</button>
         </div>
       </div>
       <div className="bg-surface rounded-lg border border-border p-3 text-sm text-muted">
-        验证步骤：1) 登录/注册获取令牌 2) 写入 Splunk/Defender/Email 三类样例 3) 查看列表与详情。后端已启用规范化、语义归一、指纹并案、AI 分析时间线占位。
+        Validation steps: 1) Sign in to obtain token 2) Ingest sample alerts (Splunk/Defender/Email) 3) View list and detail. Backend enables normalization, semantic unification, casing, and AI timeline.
       </div>
     </div>
   );

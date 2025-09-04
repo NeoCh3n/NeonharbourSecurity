@@ -52,9 +52,9 @@ export default function RespondPage({ alertIdOverride }: { alertIdOverride?: str
       <div className="col-span-12 lg:col-span-8 space-y-3">
         <div className="bg-surface rounded-lg border border-border p-3">
           <div className="flex items-center gap-3">
-            <div className="font-semibold">概览</div>
+            <div className="font-semibold">Overview</div>
             <div className="ml-auto flex items-center gap-2 text-sm">
-              <button className="px-3 py-1.5 border border-border rounded-md">Create Jira Issue</button>
+              <button className="px-3 py-1.5 border border-border rounded-md btn-gradient">Create Jira Issue</button>
               <div className="relative">
                 <details>
                   <summary className="px-3 py-1.5 border border-border rounded-md cursor-pointer select-none">Actions ▾</summary>
@@ -71,11 +71,11 @@ export default function RespondPage({ alertIdOverride }: { alertIdOverride?: str
           </div>
           <div className="mt-2 flex items-end gap-2 text-sm">
             <div>
-              <label className="block text-muted text-xs">上下文 Alert ID（用于动作审计）</label>
-              <input className="px-2 py-1 border border-border rounded-md" value={alertId} onChange={e=>setAlertId(e.target.value)} placeholder="可选：输入告警ID" />
+              <label className="block text-muted text-xs">Alert ID (for action audit)</label>
+              <input className="px-2 py-1 border border-border rounded-md" value={alertId} onChange={e=>setAlertId(e.target.value)} placeholder="Optional: enter alert id" />
             </div>
             <button className="px-3 py-1.5 border border-border rounded-md" onClick={loadDetail}>载入详情</button>
-            <div className="text-xs text-muted">说明：提交 Actions 将调用 /actions 生成审计记录。</div>
+            <div className="text-xs text-muted">Note: Actions trigger /actions to create an audit record.</div>
           </div>
           <div className="grid grid-cols-3 gap-3 mt-2">
             <div className="rounded-md border border-border p-3">
@@ -93,14 +93,14 @@ export default function RespondPage({ alertIdOverride }: { alertIdOverride?: str
           </div>
           <div className="mt-2">
             <div className="text-xs text-muted">Rationale</div>
-            <div className="text-sm">基于证据链与历史相似案例，当前倾向判断为 {determination}，建议执行最小化风险动作并持续监控。</div>
+            <div className="text-sm">Based on evidence and similar cases, current determination is {determination}. Suggest minimal-risk actions and continued monitoring.</div>
           </div>
           {message && <div className="text-xs text-muted mt-2">{message}</div>}
         </div>
 
         <div className="bg-surface rounded-lg border border-border p-3">
-          <div className="font-semibold mb-1">证据与时间线</div>
-          <div className="text-sm text-muted">可展开查看证据片段、时间线节点与来源。</div>
+          <div className="font-semibold mb-1">Evidence & Timeline</div>
+          <div className="text-sm text-muted">Expand to inspect evidence fragments, timeline nodes and sources.</div>
           {detail ? (
             <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
               <div>
@@ -113,7 +113,7 @@ export default function RespondPage({ alertIdOverride }: { alertIdOverride?: str
               </div>
             </div>
           ) : (
-            <div className="text-xs text-muted mt-2">未载入具体告警。可在上方输入 Alert ID。</div>
+            <div className="text-xs text-muted mt-2">No alert loaded. Enter an Alert ID above.</div>
           )}
         </div>
       </div>

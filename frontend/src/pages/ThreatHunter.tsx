@@ -138,10 +138,10 @@ export default function ThreatHunterPage() {
   return (
     <div className="space-y-3">
       <div className="bg-surface rounded-lg border border-border p-3 text-sm text-muted">
-        Hunt 工作台：输入问题与（可选）日志。若未配置 AI Key，系统会返回降级回答以保证可用性。
+        Hunt Workbench: Ask questions with optional logs. If AI key is not configured, a degraded but usable answer is returned.
       </div>
       <section className="bg-surface rounded-lg border border-border p-3 shadow-sm flex flex-wrap items-center gap-2">
-        <input className="px-3 py-1.5 rounded-md border border-border bg-surface text-text w-[360px]" placeholder="搜索 / Search" />
+        <input className="px-3 py-1.5 rounded-md border border-border bg-surface text-text w-[360px]" placeholder="Search" />
         <select className="px-2 py-1.5 rounded-md border border-border"><option>Severity</option></select>
         <select className="px-2 py-1.5 rounded-md border border-border"><option>Status</option></select>
         <select className="px-2 py-1.5 rounded-md border border-border"><option>Source</option></select>
@@ -149,10 +149,10 @@ export default function ThreatHunterPage() {
         <select className="px-2 py-1.5 rounded-md border border-border"><option>Tactic/Technique</option></select>
         <select className="px-2 py-1.5 rounded-md border border-border"><option>Playbook Tag</option></select>
         <div className="ml-auto flex items-center gap-2 text-sm">
-          <span className="text-muted">已选 {selected.size} 条</span>
-          <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => alert('批量指派 / Bulk Assign')}>指派</button>
-          <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => alert('更改状态')}>改状态</button>
-          <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => downloadCSV(toCSV(selectedRows), 'alerts.csv')}>导出 CSV</button>
+          <span className="text-muted">Selected {selected.size}</span>
+          <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => alert('Bulk Assign')}>Assign</button>
+          <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => alert('Change Status')}>Change Status</button>
+          <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => downloadCSV(toCSV(selectedRows), 'alerts.csv')}>Export CSV</button>
         </div>
       </section>
 
@@ -164,11 +164,11 @@ export default function ThreatHunterPage() {
         {tab==='results' ? (
           <div className="p-3 space-y-3">
             <form className="flex flex-col gap-2" onSubmit={runQuery}>
-              <input className="px-3 py-1.5 rounded-md border border-border bg-surface text-text" placeholder="输入问题 / Ask a question" value={input} onChange={e=>setInput(e.target.value)} />
-              <textarea className="px-3 py-1.5 rounded-md border border-border bg-surface text-text" placeholder="可选日志 / Optional logs" value={logs} onChange={e=>setLogs(e.target.value)} />
+              <input className="px-3 py-1.5 rounded-md border border-border bg-surface text-text" placeholder="Ask a question" value={input} onChange={e=>setInput(e.target.value)} />
+              <textarea className="px-3 py-1.5 rounded-md border border-border bg-surface text-text" placeholder="Optional logs" value={logs} onChange={e=>setLogs(e.target.value)} />
               <div className="flex gap-2">
-                <button className="px-3 py-1.5 border border-border rounded-md" type="submit">Run</button>
-                {lastFinding && <span className="text-xs text-muted">最近结果可保存到 Plan</span>}
+                <button className="px-3 py-1.5 border border-border rounded-md btn-gradient" type="submit">Run</button>
+                {lastFinding && <span className="text-xs text-muted">The latest result can be saved to Plan</span>}
               </div>
             </form>
             <div className="space-y-2">
@@ -186,21 +186,21 @@ export default function ThreatHunterPage() {
           <div className="p-3 space-y-2 text-sm">
             <div className="flex items-end gap-2">
               <div>
-                <label className="block text-muted text-xs">关联 Alert ID</label>
-                <input className="px-2 py-1 border border-border rounded-md" value={assocAlertId} onChange={e=>setAssocAlertId(e.target.value)} placeholder="输入告警ID" />
+                <label className="block text-muted text-xs">Related Alert ID</label>
+                <input className="px-2 py-1 border border-border rounded-md" value={assocAlertId} onChange={e=>setAssocAlertId(e.target.value)} placeholder="Enter alert id" />
               </div>
-              <button className="px-3 py-1.5 border border-border rounded-md" onClick={loadPlan}>加载计划</button>
-              <button disabled={!lastFinding || !assocPlan} className="px-3 py-1.5 border border-border rounded-md" onClick={saveFindingToPlan}>保存最近结果到计划</button>
+              <button className="px-3 py-1.5 border border-border rounded-md" onClick={loadPlan}>Load Plan</button>
+              <button disabled={!lastFinding || !assocPlan} className="px-3 py-1.5 border border-border rounded-md" onClick={saveFindingToPlan}>Save latest finding to Plan</button>
             </div>
             {assocPlan ? (
               <div className="bg-surfaceAlt rounded-md p-2">
-                <div className="text-muted">步骤</div>
+                <div className="text-muted">Steps</div>
                 <ul className="list-disc ml-5">
                   {(assocPlan.plan?.steps || []).map((s:any)=>(<li key={s.id}>{s.title} {s.required && '(必选)'} {s.done? '✅':''}</li>))}
                 </ul>
                 {Array.isArray(assocPlan.plan?.notes) && assocPlan.plan.notes.length>0 && (
                   <>
-                    <div className="text-muted mt-2">笔记 / Findings</div>
+                    <div className="text-muted mt-2">Findings</div>
                     <ul className="list-disc ml-5">
                       {assocPlan.plan.notes.map((n:any,i:number)=>(<li key={i}>{new Date(n.ts).toLocaleString()} - {n.answer}</li>))}
                     </ul>
@@ -208,7 +208,7 @@ export default function ThreatHunterPage() {
                 )}
               </div>
             ) : (
-              <div className="text-muted">未加载计划</div>
+              <div className="text-muted">Plan not loaded</div>
             )}
           </div>
         )}

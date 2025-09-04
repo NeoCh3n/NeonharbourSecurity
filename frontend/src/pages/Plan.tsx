@@ -77,7 +77,7 @@ export default function PlanPage({ alertIdOverride }: { alertIdOverride?: string
   return (
     <div className="space-y-3">
       <div className="bg-surface rounded-lg border border-border p-3 text-sm text-muted">
-        Plan：与具体告警绑定，问题与步骤由后端（AI分析辅助）生成。选择 Alert ID 载入后，可勾选步骤并保存笔记；点击“开始调查”进入 Investigate。
+        Plan: Bound to a specific alert. Questions and steps are AI-assisted from backend. Select an Alert ID to load, check off steps, add notes, and click “Start Investigate”.
       </div>
 
       <section className="bg-surface rounded-lg border border-border p-3 shadow-sm flex flex-wrap items-end gap-2">
@@ -86,28 +86,28 @@ export default function PlanPage({ alertIdOverride }: { alertIdOverride?: string
             <div className="text-sm">
               <span className="text-muted">Alert:</span> <span className="px-2 py-0.5 rounded bg-surfaceAlt border border-border">{alertId}</span>
             </div>
-            <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => navigate(`/alert-workspace?alertId=${alertId}&tab=investigate`)} disabled={!alertId}>开始调查</button>
+            <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => navigate(`/alert-workspace?alertId=${alertId}&tab=investigate`)} disabled={!alertId}>Start Investigate</button>
           </>
         ) : (
           <>
             <div>
-              <label className="block text-xs text-muted">选择最近告警</label>
+              <label className="block text-xs text-muted">Select recent alert</label>
               <select className="px-2 py-1.5 border border-border rounded-md min-w-[220px]" value={alertId} onChange={e=>setAlertId(e.target.value)}>
-                <option value="">— 选择 —</option>
+                <option value="">— Select —</option>
                 {alerts.map(a => (
                   <option key={a.id} value={a.id}>{a.id} · {a.source} · {new Date(a.createdAt).toLocaleString()}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="block text-xs text-muted">或手动输入 Alert ID</label>
-              <input className="px-2 py-1.5 border border-border rounded-md" placeholder="如 123" value={alertId} onChange={e=>setAlertId(e.target.value)} />
+              <label className="block text-xs text-muted">Or type Alert ID</label>
+              <input className="px-2 py-1.5 border border-border rounded-md" placeholder="e.g. 123" value={alertId} onChange={e=>setAlertId(e.target.value)} />
             </div>
-            <button className="px-3 py-1.5 border border-border rounded-md" onClick={loadPlan} disabled={!alertId || loading}>载入计划</button>
-            <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => navigate(`/alert-workspace?alertId=${alertId}&tab=investigate`)} disabled={!alertId}>开始调查</button>
+            <button className="px-3 py-1.5 border border-border rounded-md btn-gradient" onClick={loadPlan} disabled={!alertId || loading}>Load Plan</button>
+            <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => navigate(`/alert-workspace?alertId=${alertId}&tab=investigate`)} disabled={!alertId}>Start Investigate</button>
           </>
         )}
-        <div className="ml-auto text-xs text-muted">{loading ? 'Loading…' : (plan ? 'AI 生成 / 可编辑' : '未载入')}</div>
+        <div className="ml-auto text-xs text-muted">{loading ? 'Loading…' : (plan ? 'AI generated / editable' : 'Not loaded')}</div>
       </section>
 
       {error && <div className="text-danger text-sm" role="alert">{error}</div>}

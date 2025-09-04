@@ -303,6 +303,35 @@ app.get('/alerts/:id', authMiddleware, async (req, res) => {
     row.plan = parseJsonMaybe(row.plan, {});
     row.mitre = parseJsonMaybe(row.mitre, {});
     row.recommendations = parseJsonMaybe(row.recommendations, []);
+
+    // Fallback: if MITRE mapping or recommendations are missing (older alerts), compute on-demand
+    if ((!row.mitre || Object.keys(row.mitre).length === 0) || !Array.isArray(row.recommendations) || row.recommendations.length === 0) {
+      try {
+        const { toUnifiedAlert } = require('./normalizers');
+        const unified = toUnifiedAlert(row.raw || {});
+        // Recommendations
+        const { generateRecommendations } = require('./planning/plan');
+        const recs = generateRecommendations(unified);
+        // MITRE mapping (best-effort; may be null if AI unavailable)
+        let mitre = null; let tactic = row.tactic || null; let technique = row.technique || null;
+        try {
+          mitre = await mapMitre(unified);
+          if (mitre && Array.isArray(mitre.techniques) && mitre.techniques[0]) {
+            const t0 = mitre.techniques[0];
+            technique = t0.id ? `${t0.id} ${t0.name||''}`.trim() : (t0.name || technique);
+          }
+          if (mitre && Array.isArray(mitre.tactics) && mitre.tactics[0]) tactic = tactic || mitre.tactics[0].id || mitre.tactics[0].name || null;
+        } catch {}
+        // Persist if anything computed
+        await pool.query('UPDATE alerts SET recommendations=$1, mitre=$2, tactic=$3, technique=$4 WHERE id=$5 AND user_id=$6', [JSON.stringify(recs||[]), mitre ? JSON.stringify(mitre) : row.mitre || null, tactic, technique, id, req.user.id]);
+        row.recommendations = recs || row.recommendations;
+        row.mitre = mitre || row.mitre;
+        row.tactic = tactic || row.tactic;
+        row.technique = technique || row.technique;
+      } catch (e) {
+        // ignore fallback failure
+      }
+    }
     res.json(row);
   } catch (error) {
     console.error('Error fetching alert:', error);

@@ -124,7 +124,7 @@ export default function PlanPage({ alertIdOverride }: { alertIdOverride?: string
           ))}
           {steps.length > 0 && (
             <div className="bg-surface rounded-lg border border-border p-3">
-              <div className="text-muted text-sm mb-1">步骤 / Steps</div>
+              <div className="text-muted text-sm mb-1">Steps</div>
               <ul>
                 {steps.map(s => (
                   <li key={s.id} className="flex items-center gap-2 py-1 text-sm">
@@ -145,21 +145,21 @@ export default function PlanPage({ alertIdOverride }: { alertIdOverride?: string
         </div>
         <div className="col-span-12 lg:col-span-4">
           <div className="bg-surface rounded-lg border border-border p-3">
-            <div className="font-semibold mb-2">提取的实体</div>
+            <div className="font-semibold mb-2">Extracted Entities</div>
             {detail ? (
               <pre className="text-xs bg-surfaceAlt rounded-md p-2 overflow-auto max-h-[240px]">{JSON.stringify(detail.entities, null, 2)}</pre>
             ) : (
-              <div className="text-sm text-muted">未载入</div>
+              <div className="text-sm text-muted">Not loaded</div>
             )}
           </div>
           <div className="bg-surface rounded-lg border border-border p-3 mt-3">
-            <div className="font-semibold mb-2">AI 建议 / Suggested Queries</div>
+            <div className="font-semibold mb-2">AI Suggested Queries</div>
             {Array.isArray(plan?.plan?.suggestedQueries) ? (
               <ul className="text-sm list-disc ml-5">
                 {plan.plan.suggestedQueries.map((q: any, i: number) => (<li key={i}>{q.source}: {q.query}</li>))}
               </ul>
             ) : (
-              <div className="text-sm text-muted">暂无</div>
+              <div className="text-sm text-muted">None</div>
             )}
           </div>
         </div>
@@ -189,13 +189,13 @@ function PlanNotesEditor({ alertId, planState, setPlanState }: { alertId: string
   }
   return (
     <div className="mt-3">
-      <label className="block text-xs text-muted mb-1">笔记 / Findings</label>
+      <label className="block text-xs text-muted mb-1">Findings</label>
       <div className="flex items-start gap-2">
-        <textarea className="flex-1 px-2 py-1 border border-border rounded-md bg-surface text-sm" placeholder="记录你的发现或结论…" value={note} onChange={e=>setNote(e.target.value)} />
-        <button className="px-3 py-1.5 border border-border rounded-md disabled:opacity-60" disabled={saving || !note.trim()} onClick={save}>保存笔记</button>
+        <textarea className="flex-1 px-2 py-1 border border-border rounded-md bg-surface text-sm" placeholder="Record your findings or conclusions…" value={note} onChange={e=>setNote(e.target.value)} />
+        <button className="px-3 py-1.5 border border-border rounded-md disabled:opacity-60" disabled={saving || !note.trim()} onClick={save}>Save</button>
       </div>
       {Array.isArray(planState?.plan?.notes) && planState.plan.notes.length>0 && (
-        <div className="text-xs text-muted mt-2">共 {planState.plan.notes.length} 条笔记</div>
+        <div className="text-xs text-muted mt-2">{planState.plan.notes.length} notes</div>
       )}
     </div>
   );

@@ -1,8 +1,12 @@
-function generatePlan(unified, analysis) {
+const { callModel: _callModel } = require('../ai');
+
+async function generatePlan(unified, analysis) {
   const now = new Date().toISOString();
   const sev = (unified.severity || 'low').toLowerCase();
   const isHigh = sev === 'high' || sev === 'critical';
-  const steps = [
+
+  // Default fallback content
+  let steps = [
     { id: 'ack', title: 'Acknowledge alert', done: false },
     { id: 'scope', title: 'Scope impacted assets and accounts', done: false },
     { id: 'collect', title: 'Collect supporting evidence (logs, EDR, email)', done: false },
@@ -11,18 +15,42 @@ function generatePlan(unified, analysis) {
     { id: 'eradicate', title: 'Eradication and recovery', done: false, required: isHigh },
     { id: 'report', title: 'Document findings and lessons learned', done: false }
   ];
-  const questions = [
+  let questions = [
     'Is this a real threat or benign? Why?',
     'Which assets/accounts are impacted? How many?',
     'What is the root cause and initial vector?',
     'Any lateral movement or exfiltration observed?',
     'What immediate containment is needed?'
   ];
+
+  // Attempt AI-driven plan tailoring
+  try {
+    const prompt = `You are a senior SOC analyst. Given a normalized alert and a brief analysis summary/timeline, produce an investigation plan JSON.
+Return ONLY strict JSON with keys: questions (array of 4-8 concise questions tailored to determine if it's a true positive or false positive and what to do next), steps (array of {id,title,required?}).
+Prefer actionable, context-aware items referring to user, IP, host, URL, file hash if present.\n\nALERT: ${JSON.stringify(unified)}\nANALYSIS: ${JSON.stringify(analysis)}`;
+    const ai = await _callModel([
+      { role: 'system', content: 'You output only strict JSON. No prose.' },
+      { role: 'user', content: prompt }
+    ]);
+    if (ai) {
+      const cleaned = ai.replace(/```json\n?|```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed.questions) && parsed.questions.length) questions = parsed.questions.slice(0, 8);
+      if (Array.isArray(parsed.steps) && parsed.steps.length) {
+        steps = parsed.steps.map((s, i) => ({ id: s.id || `s${i+1}`, title: s.title || 'Step', required: !!s.required, done: false })).slice(0, 10);
+      }
+    }
+  } catch {}
+
   const plan = { status: 'pending', createdAt: now, steps, questions };
-  // Attach quick queries suggestion shell (logical placeholders)
+  // Suggested queries tailored to context
+  const user = unified?.principal?.user || unified?.principal?.email || '';
+  const ip = unified?.src?.ip || unified?.dst?.ip || '';
+  const url = (unified?.entities || []).find(e => e.type === 'url')?.value || '';
+  const hash = (unified?.entities || []).find(e => /sha/i.test(e.type || ''))?.value || '';
   plan.suggestedQueries = [
-    { source: 'splunk', query: 'index=security earliest=-24h user="' + (unified?.principal?.user || '') + '"' },
-    { source: 'edr', query: 'processes where sha256 in entities' },
+    { source: 'splunk', query: `index=security earliest=-24h ${user ? `user="${user}" `: ''}${ip ? ` (src=${ip} OR dest=${ip}) `:''}${url ? ` url="${url}" `:''}| stats count by source, sourcetype`.trim() },
+    { source: 'edr', query: hash ? `processes where sha256 == "${hash}"` : 'processes where reputation in (suspicious, malicious) | top hash' },
   ];
   return plan;
 }
@@ -38,4 +66,3 @@ function generateRecommendations(unified) {
 }
 
 module.exports = { generatePlan, generateRecommendations };
-

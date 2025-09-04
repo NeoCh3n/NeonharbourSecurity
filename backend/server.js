@@ -161,7 +161,7 @@ async function processAlertsForUser(alertObjs, userId) {
       if (!caseId) {
         caseId = await upsertCaseForFingerprint(unified.fingerprint, unified.severity || 'low');
       }
-      const plan = generatePlan(unified, analysis);
+      const plan = await generatePlan(unified, analysis);
       // MITRE ATT&CK mapping via AI
       let mitre = null; let tactic = null; let techniqueStr = unified.technique || null;
       try {
@@ -362,12 +362,24 @@ app.get('/alerts/:id/investigation', authMiddleware, async (req, res) => {
 app.get('/alerts/:id/plan', authMiddleware, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
-    const r = await pool.query('SELECT plan, recommendations, ack_time, investigate_start, resolve_time FROM alerts WHERE id=$1 AND user_id=$2', [id, req.user.id]);
+    const r = await pool.query('SELECT plan, recommendations, ack_time, investigate_start, resolve_time, raw, summary, timeline, evidence FROM alerts WHERE id=$1 AND user_id=$2', [id, req.user.id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const row = r.rows[0];
     row.plan = parseJsonMaybe(row.plan, {});
     row.mitre = parseJsonMaybe(row.mitre, {});
     row.recommendations = parseJsonMaybe(row.recommendations, []);
+    const needRegen = !row.plan || !Array.isArray(row.plan.questions) || row.plan.questions.length < 3;
+    if (needRegen) {
+      try {
+        const { toUnifiedAlert } = require('./normalizers');
+        const { generatePlan } = require('./planning/plan');
+        const unified = toUnifiedAlert(parseJsonMaybe(row.raw, {}));
+        const analysis = { summary: row.summary, timeline: parseJsonMaybe(row.timeline, []), evidence: parseJsonMaybe(row.evidence, []) };
+        const plan = await generatePlan(unified, analysis);
+        await pool.query('UPDATE alerts SET plan=$1 WHERE id=$2 AND user_id=$3', [JSON.stringify(plan), id, req.user.id]);
+        row.plan = plan;
+      } catch {}
+    }
     res.json(row);
   } catch (error) {
     console.error('Error fetching plan:', error);

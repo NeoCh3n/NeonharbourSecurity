@@ -213,8 +213,7 @@ If uncertain, still provide best-guess with lower confidence. Alert JSON: ${text
     ]);
     if (!aiResp) return null;
     try {
-      const cleaned = aiResp.replace(/```json
-?|```/g, '').trim();
+      const cleaned = aiResp.replace(/```json\n?|```/g, '').trim();
       const obj = JSON.parse(cleaned);
       obj.tactics = Array.isArray(obj.tactics) ? obj.tactics : [];
       obj.techniques = Array.isArray(obj.techniques) ? obj.techniques : [];

@@ -16,7 +16,9 @@ export default function IngestPage() {
     const t = localStorage.getItem('token');
     if (t) setStatus('已登录 / Token present');
     // Load integrations if logged in
-    integrationsApi.get().then(d => setIntegrations(d.integrations || [])).catch(()=>{});
+    if (t) {
+      integrationsApi.get().then(d => setIntegrations(d.integrations || [])).catch(()=>{});
+    }
   }, []);
 
   async function ensureLogin() {
@@ -110,6 +112,8 @@ export default function IngestPage() {
         <IntegrationsEditor items={integrations} onChange={setIntegrations} />
         <div className="mt-3">
           <button disabled={savingIntegrations} className="px-3 py-1.5 border border-border rounded-md" onClick={async ()=>{
+            const ok = await ensureLogin();
+            if (!ok) { setStatus('未登录，无法保存'); return; }
             setSavingIntegrations(true);
             try {
               await integrationsApi.save(integrations);

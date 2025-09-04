@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Link } from 'react-router-dom';
 import apiRequest from '../services/api';
 
@@ -7,8 +8,15 @@ type CaseRow = { id: number; severity: string; status: string; owner?: string; a
 export default function CasesPage() {
   const [rows, setRows] = useState<CaseRow[]>([]);
   const [error, setError] = useState('');
+  const navigate = useNavigate();
   useEffect(() => {
-    apiRequest('/cases').then(d => setRows(d.cases || [])).catch((e:any)=>setError(e?.message || '加载失败'));
+    apiRequest('/cases').then(d => setRows(d.cases || [])).catch((e:any)=>{
+      if (e?.status === 401) {
+        setError('未登录或令牌失效，请前往“数据源”登录。');
+      } else {
+        setError(e?.message || '加载失败');
+      }
+    });
   }, []);
 
   return (
@@ -17,7 +25,14 @@ export default function CasesPage() {
         <div className="font-semibold">案件列表</div>
         <div className="text-sm text-muted">去重归案后的聚合视图</div>
       </div>
-      {error && <div className="text-danger text-sm" role="alert">{error}</div>}
+      {error && (
+        <div className="text-danger text-sm flex items-center gap-2" role="alert">
+          <span>{error}</span>
+          {error.includes('未登录') && (
+            <button className="px-2 py-1 border border-border rounded-md" onClick={()=>navigate('/ingest')}>去登录</button>
+          )}
+        </div>
+      )}
       <div className="bg-surface rounded-lg border border-border overflow-auto">
         <table className="w-full text-sm">
           <thead className="bg-surfaceAlt">
@@ -52,4 +67,3 @@ export default function CasesPage() {
     </div>
   );
 }
-

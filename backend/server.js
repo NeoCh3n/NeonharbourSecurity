@@ -522,20 +522,19 @@ app.get('/metrics', authMiddleware, async (req, res) => {
 app.get('/cases', authMiddleware, async (req, res) => {
   try {
     const sql = `
-      SELECT c.id, c.severity, c.status, c.owner,
-             COALESCE(cnt.total, 0) AS alert_count,
-             COALESCE(lat.latest, c.created_at) AS latest
-      FROM cases c
-      LEFT JOIN (
-        SELECT case_id, COUNT(*) AS total FROM case_alerts GROUP BY case_id
-      ) cnt ON cnt.case_id = c.id
-      LEFT JOIN (
-        SELECT ca.case_id, MAX(a.created_at) AS latest
-        FROM case_alerts ca JOIN alerts a ON a.id = ca.alert_id
+      SELECT x.id, x.severity, x.status, x.owner, x.alert_count, x.latest
+      FROM (
+        SELECT c.id, c.severity, c.status, c.owner,
+               COUNT(a.id) AS alert_count,
+               MAX(a.created_at) AS latest,
+               c.created_at AS c_created
+        FROM cases c
+        JOIN case_alerts ca ON ca.case_id = c.id
+        JOIN alerts a ON a.id = ca.alert_id
         WHERE a.user_id = $1
-        GROUP BY ca.case_id
-      ) lat ON lat.case_id = c.id
-      ORDER BY COALESCE(lat.latest, c.created_at) DESC, c.id DESC`;
+        GROUP BY c.id, c.severity, c.status, c.owner, c.created_at
+      ) x
+      ORDER BY COALESCE(x.latest, x.c_created) DESC, x.id DESC`;
     const r = await pool.query(sql, [req.user.id]);
     res.json({ cases: r.rows });
   } catch (error) {

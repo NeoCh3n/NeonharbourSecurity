@@ -60,6 +60,20 @@ async function initDatabase() {
       )
     `);
 
+    // Integrations per user (data source connections)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS integrations (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        provider VARCHAR(100) NOT NULL,
+        enabled BOOLEAN DEFAULT false,
+        settings JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_integrations_user_provider ON integrations (user_id, provider)');
+
     // Cases and mapping table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS cases (

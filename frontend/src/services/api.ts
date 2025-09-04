@@ -105,4 +105,10 @@ export const actionsApi = {
   request: (id: number, action: string, reason: string) => apiRequest(`/actions/${id}/request`, { method: 'POST', body: JSON.stringify({ action, reason }) })
 };
 
+export type IntegrationItem = { provider: string; enabled: boolean; settings?: any };
+export const integrationsApi = {
+  get: (): Promise<{ integrations: IntegrationItem[] }> => apiRequest('/integrations'),
+  save: (integrations: IntegrationItem[]) => apiRequest('/integrations', { method: 'POST', body: JSON.stringify({ integrations }) })
+};
+
 export default apiRequest;

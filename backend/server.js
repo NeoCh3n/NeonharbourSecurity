@@ -359,6 +359,55 @@ app.post('/alerts/:id/plan', authMiddleware, async (req, res) => {
   }
 });
 
+// Integrations: list user's configured data sources
+app.get('/integrations', authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query(
+      'SELECT provider, enabled, settings FROM integrations WHERE user_id=$1 ORDER BY provider',
+      [req.user.id]
+    );
+    res.json({ integrations: r.rows.map(row => ({ provider: row.provider, enabled: !!row.enabled, settings: row.settings || {} })) });
+  } catch (error) {
+    console.error('Error fetching integrations:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Upsert integrations for the user
+app.post('/integrations', authMiddleware, async (req, res) => {
+  const items = Array.isArray(req.body?.integrations) ? req.body.integrations : null;
+  if (!items) return res.status(400).json({ error: 'Missing integrations' });
+  try {
+    for (const it of items) {
+      const provider = String(it.provider || '').toLowerCase();
+      if (!provider) continue;
+      const enabled = !!it.enabled;
+      const settings = it.settings && typeof it.settings === 'object' ? it.settings : {};
+      // Try update, then insert if not exists
+      const upd = await pool.query(
+        'UPDATE integrations SET enabled=$1, settings=$2, updated_at=NOW() WHERE user_id=$3 AND provider=$4',
+        [enabled, settings, req.user.id, provider]
+      );
+      if (upd.rowCount === 0) {
+        await pool.query(
+          'INSERT INTO integrations (user_id, provider, enabled, settings) VALUES ($1,$2,$3,$4)',
+          [req.user.id, provider, enabled, settings]
+        );
+      }
+      try {
+        await pool.query(
+          'INSERT INTO audit_logs (action, user_id, details, ip_address) VALUES ($1, $2, $3, $4)',
+          ['integrations_update', req.user.id, { provider, enabled }, req.ip]
+        );
+      } catch {}
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating integrations:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Request an action (human approval flow placeholder)
 app.post('/actions/:id/request', authMiddleware, async (req, res) => {
   const id = parseInt(req.params.id, 10);

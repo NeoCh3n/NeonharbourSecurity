@@ -14,6 +14,7 @@ import ReportPage from './pages/Report.tsx';
 import ThreatHunterPage from './pages/ThreatHunter.tsx';
 import IngestPage from './pages/Ingest.tsx';
 import AlertsListPage from './pages/AlertsList.tsx';
+import AlertWorkspacePage from './pages/AlertWorkspace.tsx';
 import { ThemeProvider } from './store/theme';
 import { worker } from './mocks/browser';
 
@@ -34,6 +35,7 @@ const router = createBrowserRouter([
       { path: 'adapt', element: <AdaptPage /> },
       { path: 'report', element: <ReportPage /> },
       { path: 'hunt', element: <ThreatHunterPage /> },
+      { path: 'alert-workspace', element: <AlertWorkspacePage /> },
       { path: 'ingest', element: <IngestPage /> },
       { path: 'alerts-list', element: <AlertsListPage /> }
     ]

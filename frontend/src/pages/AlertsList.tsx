@@ -83,7 +83,10 @@ export default function AlertsListPage() {
                 <td className="px-3 py-2">{r.source}</td>
                 <td className="px-3 py-2">{r.status}</td>
                 <td className="px-3 py-2">{r.severity}</td>
-                <td className="px-3 py-2"><button className="px-2 py-1 border border-border rounded-md" onClick={() => openDetail(r.id)}>详情</button></td>
+                <td className="px-3 py-2 flex gap-2">
+                  <button className="px-2 py-1 border border-border rounded-md" onClick={() => openDetail(r.id)}>详情</button>
+                  <a className="px-2 py-1 border border-border rounded-md" href={`/alert-workspace?alertId=${r.id}`}>工作台</a>
+                </td>
               </tr>
             ))}
             {rows.length === 0 && (

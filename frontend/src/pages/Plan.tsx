@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiRequest, { alertsApi, planApi } from '../services/api';
+import { useSearchParams } from 'react-router-dom';
 
 type Step = { id: string; title: string; done?: boolean; required?: boolean };
 
-export default function PlanPage() {
+export default function PlanPage({ alertIdOverride }: { alertIdOverride?: string } = {}) {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [alertId, setAlertId] = useState('');
   const [alerts, setAlerts] = useState<any[]>([]);
@@ -17,6 +19,22 @@ export default function PlanPage() {
     // preload latest alerts for quick selection
     alertsApi.list().then(d => setAlerts(d.alerts || [])).catch(()=>{});
   }, []);
+
+  // When override or URL param is present, adopt it and auto-load
+  useEffect(() => {
+    const urlId = params.get('alertId') || '';
+    const id = alertIdOverride || urlId;
+    if (id && id !== alertId) {
+      setAlertId(id);
+    }
+  }, [alertIdOverride, params]);
+
+  useEffect(() => {
+    if (alertId && !plan) {
+      void loadPlan();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alertId]);
 
   async function loadPlan() {
     setError('');
@@ -63,21 +81,29 @@ export default function PlanPage() {
       </div>
 
       <section className="bg-surface rounded-lg border border-border p-3 shadow-sm flex flex-wrap items-end gap-2">
-        <div>
-          <label className="block text-xs text-muted">选择最近告警</label>
-          <select className="px-2 py-1.5 border border-border rounded-md min-w-[220px]" value={alertId} onChange={e=>setAlertId(e.target.value)}>
-            <option value="">— 选择 —</option>
-            {alerts.map(a => (
-              <option key={a.id} value={a.id}>{a.id} · {a.source} · {new Date(a.createdAt).toLocaleString()}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-muted">或手动输入 Alert ID</label>
-          <input className="px-2 py-1.5 border border-border rounded-md" placeholder="如 123" value={alertId} onChange={e=>setAlertId(e.target.value)} />
-        </div>
-        <button className="px-3 py-1.5 border border-border rounded-md" onClick={loadPlan} disabled={!alertId || loading}>载入计划</button>
-        <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => navigate(`/investigate?alertId=${alertId}`)} disabled={!alertId}>开始调查</button>
+        {alertIdOverride ? (
+          <div className="text-sm">
+            <span className="text-muted">Alert:</span> <span className="px-2 py-0.5 rounded bg-surfaceAlt border border-border">{alertId}</span>
+          </div>
+        ) : (
+          <>
+            <div>
+              <label className="block text-xs text-muted">选择最近告警</label>
+              <select className="px-2 py-1.5 border border-border rounded-md min-w-[220px]" value={alertId} onChange={e=>setAlertId(e.target.value)}>
+                <option value="">— 选择 —</option>
+                {alerts.map(a => (
+                  <option key={a.id} value={a.id}>{a.id} · {a.source} · {new Date(a.createdAt).toLocaleString()}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-muted">或手动输入 Alert ID</label>
+              <input className="px-2 py-1.5 border border-border rounded-md" placeholder="如 123" value={alertId} onChange={e=>setAlertId(e.target.value)} />
+            </div>
+            <button className="px-3 py-1.5 border border-border rounded-md" onClick={loadPlan} disabled={!alertId || loading}>载入计划</button>
+            <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => navigate(`/investigate?alertId=${alertId}`)} disabled={!alertId}>开始调查</button>
+          </>
+        )}
         <div className="ml-auto text-xs text-muted">{loading ? 'Loading…' : (plan ? 'AI 生成 / 可编辑' : '未载入')}</div>
       </section>
 

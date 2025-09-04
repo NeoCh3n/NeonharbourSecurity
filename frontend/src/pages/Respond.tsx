@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import apiRequest, { actionsApi } from '../services/api';
 
-export default function RespondPage() {
+export default function RespondPage({ alertIdOverride }: { alertIdOverride?: string } = {}) {
   const [params] = useSearchParams();
   const [determination, setDetermination] = useState<'Malicious'|'Benign'|'Uncertain'>('Uncertain');
   const [severity, setSeverity] = useState<'Low'|'Medium'|'High'|'Critical'>('Medium');
@@ -43,9 +43,9 @@ export default function RespondPage() {
   }
 
   useEffect(() => {
-    const q = params.get('alertId');
+    const q = alertIdOverride || params.get('alertId');
     if (q) setAlertId(q);
-  }, [params]);
+  }, [alertIdOverride, params]);
 
   return (
     <div className="grid grid-cols-12 gap-3">

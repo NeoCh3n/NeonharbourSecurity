@@ -6,9 +6,9 @@ import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recha
 
 type Event = { ts: string; text: string; sev: 'Low'|'Medium'|'High' };
 
-export default function InvestigatePage() {
+export default function InvestigatePage({ alertIdOverride }: { alertIdOverride?: string } = {}) {
   const [params] = useSearchParams();
-  const alertId = params.get('alertId');
+  const alertId = alertIdOverride || params.get('alertId');
   const [timeline, setTimeline] = useState<Event[]>([
     { ts: new Date(Date.now()-60*60*1000).toISOString(), text: '成功登录 azure – alice', sev: 'Low' },
     { ts: new Date(Date.now()-55*60*1000).toISOString(), text: '非常规地点登录 – 香港 -> 新加坡', sev: 'Medium' },

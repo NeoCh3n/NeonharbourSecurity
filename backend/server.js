@@ -554,6 +554,21 @@ app.get('/metrics', authMiddleware, async (req, res) => {
        FROM alerts WHERE user_id = $1 AND resolve_time IS NOT NULL`,
       [req.user.id]
     );
+    // Resolved alerts count based on resolve_time
+    const resolvedResult = await pool.query(
+      'SELECT COUNT(*) as resolved FROM alerts WHERE user_id = $1 AND resolve_time IS NOT NULL',
+      [req.user.id]
+    );
+    // Investigated alerts count based on investigate_start
+    const investigatedResult = await pool.query(
+      'SELECT COUNT(*) as investigated FROM alerts WHERE user_id = $1 AND investigate_start IS NOT NULL',
+      [req.user.id]
+    );
+    // Acknowledged alerts count based on ack_time
+    const acknowledgedResult = await pool.query(
+      'SELECT COUNT(*) as acknowledged FROM alerts WHERE user_id = $1 AND ack_time IS NOT NULL',
+      [req.user.id]
+    );
     
     const severityCounts = {};
     severityResult.rows.forEach(row => {
@@ -567,11 +582,21 @@ app.get('/metrics', authMiddleware, async (req, res) => {
     const totalFeedback = parseInt(feedbackResult.rows[0].total_feedback || 0);
     const feedbackScore = totalFeedback > 0 ? Math.round((accurate / totalFeedback) * 100) : 0;
     
+    const totalAlerts = parseInt(totalResult.rows[0].total);
+    const resolvedCount = parseInt(resolvedResult.rows[0].resolved || 0);
+    const investigatedCount = parseInt(investigatedResult.rows[0].investigated || 0);
+    const acknowledgedCount = parseInt(acknowledgedResult.rows[0].acknowledged || 0);
+    const backlogCount = Math.max(0, totalAlerts - resolvedCount);
+
     res.json({
-      totalAlerts: parseInt(totalResult.rows[0].total),
+      totalAlerts,
       severityCounts,
       statusCounts,
-      investigatedCount: parseInt(totalResult.rows[0].total),
+      investigatedCount,
+      investigatingCount: investigatedCount,
+      acknowledgedCount,
+      resolvedCount,
+      backlogCount,
       feedbackScore,
       avgAnalysisTime: timeResult.rows[0].avg_time ? parseFloat(timeResult.rows[0].avg_time) : 0,
       mttiSec: mttiResult.rows[0].mtti_sec ? parseFloat(mttiResult.rows[0].mtti_sec) : 0,

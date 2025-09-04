@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { ChartFrame, ChartSkeleton, downsample } from '../components/charts/ChartFrame';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
+import { AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
+import type { ColumnDef } from '@tanstack/react-table';
+import { DataTable } from '../components/datatable/DataTable';
 import { useUI } from '../store/ui';
 import { alertsApi, metricsApi } from '../services/api';
 
@@ -44,25 +46,49 @@ export default function DashboardPage() {
     return Object.keys(obj).map(k => ({ name: k, count: obj[k] }));
   })();
 
-  const statusRows = (() => {
-    const obj = metricsQ.data?.statusCounts || {};
-    return Object.keys(obj).map(k => ({ name: k, count: obj[k] }));
-  })();
+  // Note: status distribution available via metrics if needed for future panels
 
-  const cards = [
-    { label: 'Total Alerts', value: metricsQ.data?.totalAlerts ?? 0 },
-    { label: 'Avg Analysis Time', value: (metricsQ.data?.avgAnalysisTime ?? 0) + ' ms' },
-    { label: 'MTTI', value: formatMin(metricsQ.data?.mttiSec) },
-    { label: 'MTTR', value: formatMin(metricsQ.data?.mttrSec) },
-    { label: 'Investigated', value: metricsQ.data?.investigatedCount ?? 0 },
-    { label: 'Feedback Score', value: (metricsQ.data?.feedbackScore ?? 0) + '%' },
-  ];
+  // KPI hero values (aligns to the target layout)
+  const totalInvestigations = metricsQ.data?.totalAlerts ?? 0;
+  const resolvedCount = (metricsQ.data?.resolvedCount as number) ?? (metricsQ.data?.statusCounts?.resolved as number) ?? 0;
+
+  // Simple 7-day over previous-7-day delta from trend
+  function pctDeltaFromTrend(points: TrendPoint[]): number {
+    if (!points || points.length < 14) return 0;
+    const last7 = points.slice(-7).reduce((s, p) => s + (p.alerts || 0), 0);
+    const prev7 = points.slice(-14, -7).reduce((s, p) => s + (p.alerts || 0), 0);
+    if (prev7 === 0) return last7 > 0 ? 100 : 0;
+    return ((last7 - prev7) / prev7) * 100;
+  }
+  const kpiDelta = pctDeltaFromTrend(trend);
 
   function formatMin(seconds?: number) {
     const s = Math.max(0, Math.round(seconds || 0));
     const m = (s / 60).toFixed(1);
     return `${m} min`;
   }
+
+  // Alerts by source aggregation for the bottom-right panel
+  const sourceRows = (() => {
+    const arr = alertsQ.data?.alerts || [];
+    const by: Record<string, number> = {};
+    arr.forEach((a: any) => {
+      const key = a.source || 'unknown';
+      by[key] = (by[key] || 0) + 1;
+    });
+    return Object.keys(by).map(k => ({ name: k, count: by[k] }));
+  })();
+
+  // Top 10 alerts table data (latest 10)
+  type AlertRow = { id: number; createdAt: string; severity: string; source: string; status: string };
+  const top10: AlertRow[] = (alertsQ.data?.alerts || []).slice(0, 10);
+  const columns: ColumnDef<AlertRow, any>[] = [
+    { accessorKey: 'id', header: 'ID', cell: info => info.getValue() },
+    { accessorKey: 'createdAt', header: 'Created', cell: info => new Date(info.getValue()).toLocaleString() },
+    { accessorKey: 'severity', header: 'Severity' },
+    { accessorKey: 'source', header: 'Source' },
+    { accessorKey: 'status', header: 'Status' },
+  ];
 
   return (
     <div className="space-y-4">
@@ -82,18 +108,56 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* KPI hero strip */}
       <section className="grid grid-cols-12 gap-3">
-        {cards.map((c, idx) => (
-          <div key={idx} className="col-span-12 sm:col-span-6 lg:col-span-3 bg-surface rounded-lg border border-border p-3 shadow-sm">
-            <div className="text-xs text-muted">{c.label}</div>
-            <div className="text-2xl font-semibold">{c.value}</div>
+        <div className="col-span-12 lg:col-span-6 bg-surface rounded-lg border border-border p-4 shadow-sm">
+          <div className="text-sm text-muted mb-1 flex items-center gap-2">
+            <span>ⓘ</span>
+            <span>Total investigations</span>
           </div>
-        ))}
+          <div className="flex items-end justify-between">
+            <div className="text-5xl leading-none font-semibold">{totalInvestigations}</div>
+            <div className="text-sm" style={{ color: kpiDelta >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+              {kpiDelta >= 0 ? '▲' : '▼'} {Math.abs(kpiDelta).toFixed(1)}%
+            </div>
+          </div>
+        </div>
+        <div className="col-span-12 lg:col-span-6 bg-surface rounded-lg border border-border p-4 shadow-sm">
+          <div className="text-sm text-muted mb-1 flex items-center gap-2">
+            <span>⚙️</span>
+            <span>Resolved</span>
+          </div>
+          <div className="flex items-end justify-between">
+            <div className="text-5xl leading-none font-semibold">{resolvedCount}</div>
+            <div className="text-sm" style={{ color: 'var(--success)' }}>▲ {Math.max(0, kpiDelta).toFixed(1)}%</div>
+          </div>
+        </div>
       </section>
 
+      {/* Full-width investigations trend */}
       <section className="grid grid-cols-12 gap-3">
-        <div className="col-span-12 lg:col-span-7">
-          <ChartFrame title="Alert Trend (Last 30 days)">
+        <div className="col-span-12">
+          <ChartFrame title="Total investigations">
+            <ResponsiveContainer width="100%" height="100%">
+              {alertsQ.isLoading ? (
+                <ChartSkeleton />
+              ) : (
+                <LineChart data={downsample(trend, 1)}>
+                  <XAxis dataKey="day" hide />
+                  <YAxis width={40} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="alerts" stroke="#8B5CF6" strokeWidth={2} dot={false} />
+                </LineChart>
+              )}
+            </ResponsiveContainer>
+          </ChartFrame>
+        </div>
+      </section>
+
+      {/* Full-width ingested alerts */}
+      <section className="grid grid-cols-12 gap-3">
+        <div className="col-span-12">
+          <ChartFrame title="Ingested Alerts">
             <ResponsiveContainer width="100%" height="100%">
               {alertsQ.isLoading ? (
                 <ChartSkeleton />
@@ -101,51 +165,40 @@ export default function DashboardPage() {
                 <AreaChart data={downsample(trend, 1)}>
                   <defs>
                     <linearGradient id="colorAlerts" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#60A5FA" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#60A5FA" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#22D3EE" stopOpacity={0.7}/>
+                      <stop offset="95%" stopColor="#22D3EE" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
                   <XAxis dataKey="day" hide />
                   <YAxis width={40} />
                   <Tooltip />
-                  <Area type="monotone" dataKey="alerts" stroke="#60A5FA" fillOpacity={1} fill="url(#colorAlerts)" />
+                  <Area type="monotone" dataKey="alerts" stroke="#22D3EE" fillOpacity={1} fill="url(#colorAlerts)" />
                 </AreaChart>
-              )}
-            </ResponsiveContainer>
-          </ChartFrame>
-        </div>
-        <div className="col-span-12 lg:col-span-5">
-          <ChartFrame title="Severity Distribution">
-            <ResponsiveContainer width="100%" height="100%">
-              {metricsQ.isLoading ? (
-                <ChartSkeleton />
-              ) : (
-                <BarChart data={severityRows}>
-                  <XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0}/>
-                  <YAxis width={40}/>
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="count" fill="#2D6AE3" />
-                </BarChart>
               )}
             </ResponsiveContainer>
           </ChartFrame>
         </div>
       </section>
 
+      {/* Bottom split: Top 10 Alerts and Alerts by Source */}
       <section className="grid grid-cols-12 gap-3">
         <div className="col-span-12 lg:col-span-6">
-          <ChartFrame title="Status Distribution">
+          <section className="bg-surface rounded-lg border border-border p-3 shadow-sm">
+            <div className="text-sm text-muted mb-2">Top 10 Alerts</div>
+            <DataTable columns={columns} data={top10} height={320} />
+          </section>
+        </div>
+        <div className="col-span-12 lg:col-span-6">
+          <ChartFrame title="Alerts by Source">
             <ResponsiveContainer width="100%" height="100%">
-              {metricsQ.isLoading ? (
+              {alertsQ.isLoading ? (
                 <ChartSkeleton />
               ) : (
-                <BarChart data={statusRows}>
+                <BarChart data={sourceRows}>
                   <XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0}/>
                   <YAxis width={40}/>
                   <Tooltip />
-                  <Legend />
-                  <Bar dataKey="count" fill="#90caf9" />
+                  <Bar dataKey="count" fill="#2D6AE3" />
                 </BarChart>
               )}
             </ResponsiveContainer>

@@ -4,6 +4,7 @@ import { Topbar } from './components/shell/Topbar';
 import { RightPanel } from './components/shell/RightPanel';
 import { useUI } from './store/ui';
 import { useEffect } from 'react';
+import { Analytics } from './components/integrations/Analytics';
 
 export default function App() {
   const rightPanelOpen = useUI(s => s.rightPanelOpen);
@@ -19,6 +20,7 @@ export default function App() {
 
   return (
     <div className="desktop-frame min-h-full grid" style={{ gridTemplateRows: '56px 1fr' }}>
+      <Analytics />
       <Topbar />
       <div className="grid" style={{ gridTemplateColumns: rightPanelOpen ? 'auto 1fr 320px' : 'auto 1fr' }}>
         <Sidebar />

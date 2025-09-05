@@ -39,6 +39,24 @@ export function Sidebar() {
               {expanded && <span>Alerts</span>}
             </NavLink>
           </li>
+          <li>
+            <NavLink to="/approvals" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
+              <span>✅</span>
+              {expanded && <span>Approvals</span>}
+            </NavLink>
+          </li>
+          <li>
+            <NavLink to="/policies" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
+              <span>🛡️</span>
+              {expanded && <span>Policies</span>}
+            </NavLink>
+          </li>
+          <li>
+            <NavLink to="/admin" className={({ isActive }) => `flex items-center gap-2 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}>
+              <span>⚙️</span>
+              {expanded && <span>Settings</span>}
+            </NavLink>
+          </li>
         </ul>
       </nav>
     </aside>

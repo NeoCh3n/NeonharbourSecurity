@@ -80,7 +80,7 @@ async function authMiddleware(req, res, next) {
   const token = auth.split(' ')[1];
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    const result = await pool.query('SELECT id, email FROM users WHERE id = $1', [payload.id]);
+    const result = await pool.query('SELECT id, email, is_admin FROM users WHERE id = $1', [payload.id]);
     if (result.rows.length === 0) return res.status(401).json({ error: 'Invalid token' });
     req.user = result.rows[0];
     next();
@@ -97,15 +97,17 @@ app.post('/auth/register', async (req, res) => {
   try {
     const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
     if (existingUser.rows.length > 0) return res.status(400).json({ error: 'Email exists' });
-    
     const hashed = await bcrypt.hash(password, 10);
+    // First user becomes admin
+    const c = await pool.query('SELECT COUNT(*)::int AS count FROM users');
+    const isAdmin = (c.rows[0]?.count || 0) === 0;
     const result = await pool.query(
-      'INSERT INTO users (email, password) VALUES ($1, $2) RETURNING id, email',
-      [email, hashed]
+      'INSERT INTO users (email, password, is_admin) VALUES ($1, $2, $3) RETURNING id, email, is_admin',
+      [email, hashed, isAdmin]
     );
     const user = result.rows[0];
     const token = generateToken(user);
-    res.json({ token });
+    res.json({ token, isAdmin: user.is_admin });
   } catch (error) {
     console.error('Registration error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -116,7 +118,7 @@ app.post('/auth/login', async (req, res) => {
   const { email, password } = req.body;
   
   try {
-    const result = await pool.query('SELECT id, email, password FROM users WHERE email = $1', [email]);
+    const result = await pool.query('SELECT id, email, password, is_admin FROM users WHERE email = $1', [email]);
     if (result.rows.length === 0) return res.status(400).json({ error: 'Invalid credentials' });
     
     const user = result.rows[0];
@@ -124,7 +126,7 @@ app.post('/auth/login', async (req, res) => {
     if (!match) return res.status(400).json({ error: 'Invalid credentials' });
     
     const token = generateToken(user);
-    res.json({ token });
+    res.json({ token, isAdmin: user.is_admin });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -132,7 +134,7 @@ app.post('/auth/login', async (req, res) => {
 });
 
 app.get('/auth/me', authMiddleware, (req, res) => {
-  res.json({ id: req.user.id, email: req.user.email });
+  res.json({ id: req.user.id, email: req.user.email, isAdmin: !!req.user.is_admin });
 });
 
 const { runPipeline } = require('./pipeline/runPipeline');
@@ -141,7 +143,8 @@ const { findSimilarCaseCandidate } = require('./casing/case_linker');
 const { generatePlan, generateRecommendations } = require('./planning/plan');
 const { getOrInitCasePlan, createSession, addMemory, listCaseMemory, getCasePlan, updateCasePlan, listSessions, getSession } = require('./memory/store');
 const { summarizeCaseMemory, summarizeAllCasesForUser } = require('./memory/summarizer');
-const { evaluateAction, checkSegregationOfDuties } = require('./policy/engine');
+const { getSetting, setSetting } = require('./config/settings');
+const { evaluateAction, checkSegregationOfDuties, getPoliciesForUser, ensureDefaultPolicies } = require('./policy/engine');
 const { toolExecutor } = require('./utils/execution');
 const { getTool } = require('./tools');
 const { auditLog } = require('./middleware/audit');
@@ -571,6 +574,36 @@ app.post('/jobs/summarize-cases', authMiddleware, async (req, res) => {
   }
 });
 
+// Admin: LLM provider toggle (single option)
+function requireAdmin(req, res, next) {
+  if (!req.user || !req.user.is_admin) return res.status(403).json({ error: 'Admin only' });
+  next();
+}
+
+app.get('/admin/settings/llm', authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const v = await getSetting('llm_provider', { provider: process.env.AI_PROVIDER || 'deepseek' });
+    res.json(v);
+  } catch (e) {
+    console.error('Error reading LLM setting:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/admin/settings/llm', authMiddleware, requireAdmin, async (req, res) => {
+  const { provider } = req.body || {};
+  const p = String(provider || '').toLowerCase();
+  if (!['deepseek', 'local'].includes(p)) return res.status(400).json({ error: 'Invalid provider' });
+  try {
+    await setSetting('llm_provider', { provider: p });
+    await auditLog('admin_llm_provider_update', req.user.id, { provider: p, ipAddress: req.ip });
+    res.json({ success: true, provider: p });
+  } catch (e) {
+    console.error('Error updating LLM setting:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Upsert integrations for the user
 app.post('/integrations', authMiddleware, async (req, res) => {
   const items = Array.isArray(req.body?.integrations) ? req.body.integrations : null;
@@ -722,6 +755,91 @@ app.post('/approvals/:approvalId/deny', authMiddleware, async (req, res) => {
     res.json({ success: true, approval: upd.rows[0] });
   } catch (e) {
     console.error('Error denying request:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Policies management
+app.get('/policies', authMiddleware, async (req, res) => {
+  try {
+    const rows = await getPoliciesForUser(req.user.id);
+    res.json({ policies: rows });
+  } catch (e) {
+    console.error('Error listing policies:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/policies', authMiddleware, async (req, res) => {
+  const { name, description, effect, action_pattern, resource_pattern = '*', conditions = {}, risk = null } = req.body || {};
+  if (!name || !effect || !action_pattern) return res.status(400).json({ error: 'Missing required fields' });
+  const eff = String(effect).toLowerCase();
+  if (!['allow','deny','require_approval'].includes(eff)) return res.status(400).json({ error: 'Invalid effect' });
+  try {
+    const conds = typeof conditions === 'string' ? JSON.parse(conditions) : (conditions || {});
+    const r = await pool.query(
+      `INSERT INTO policies (user_id, name, description, effect, action_pattern, resource_pattern, conditions, risk)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [req.user.id, name, description || null, eff, action_pattern, resource_pattern || '*', conds, risk]
+    );
+    await auditLog('policy_create', req.user.id, { policyId: r.rows[0].id, ipAddress: req.ip });
+    res.json({ success: true, policy: r.rows[0] });
+  } catch (e) {
+    console.error('Error creating policy:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.put('/policies/:id', authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { name, description, effect, action_pattern, resource_pattern, conditions, risk } = req.body || {};
+  try {
+    const conds = typeof conditions === 'string' ? JSON.parse(conditions) : (conditions || {});
+    const eff = effect ? String(effect).toLowerCase() : null;
+    if (eff && !['allow','deny','require_approval'].includes(eff)) return res.status(400).json({ error: 'Invalid effect' });
+    const r = await pool.query(
+      `UPDATE policies SET
+         name=COALESCE($1,name),
+         description=COALESCE($2,description),
+         effect=COALESCE($3,effect),
+         action_pattern=COALESCE($4,action_pattern),
+         resource_pattern=COALESCE($5,resource_pattern),
+         conditions=COALESCE($6,conditions),
+         risk=COALESCE($7,risk)
+       WHERE id=$8 AND user_id=$9 RETURNING *`,
+      [name || null, description || null, eff, action_pattern || null, resource_pattern || null, conds || null, risk || null, id, req.user.id]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    await auditLog('policy_update', req.user.id, { policyId: id, ipAddress: req.ip });
+    res.json({ success: true, policy: r.rows[0] });
+  } catch (e) {
+    console.error('Error updating policy:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/policies/:id', authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const r = await pool.query('DELETE FROM policies WHERE id=$1 AND user_id=$2 RETURNING id', [id, req.user.id]);
+    if (r.rowCount === 0) return res.status(404).json({ error: 'Not found' });
+    await auditLog('policy_delete', req.user.id, { policyId: id, ipAddress: req.ip });
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Error deleting policy:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/policies/reset-defaults', authMiddleware, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM policies WHERE user_id=$1', [req.user.id]);
+    await ensureDefaultPolicies(req.user.id);
+    await auditLog('policy_reset_defaults', req.user.id, { ipAddress: req.ip });
+    const rows = await getPoliciesForUser(req.user.id);
+    res.json({ success: true, policies: rows });
+  } catch (e) {
+    console.error('Error resetting policies:', e);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -901,9 +1019,12 @@ app.get('/health', (req, res) => {
 
 // Detailed health for local testing (no secrets exposed)
 app.get('/health/details', (req, res) => {
+  const provider = (process.env.AI_PROVIDER || 'deepseek').toLowerCase();
   const dsKey = !!process.env.DEEPSEEK_API_KEY;
   const dsBase = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1';
   const dsModel = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+  const localBase = process.env.LOCAL_LLM_BASE_URL || 'http://127.0.0.1:1234/v1';
+  const localModel = process.env.LOCAL_LLM_MODEL || 'zysec-ai_-_securityllm';
   const vtFlag = (process.env.USE_VIRUSTOTAL || '').toLowerCase();
   const vtEnabled = (vtFlag === '1' || vtFlag === 'true' || vtFlag === 'yes') && !!process.env.VIRUSTOTAL_API_KEY;
   let baseOrigin = dsBase;
@@ -912,7 +1033,12 @@ app.get('/health/details', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    ai: {
+    ai: provider === 'local' ? {
+      provider: 'local',
+      configured: true,
+      base: localBase,
+      model: localModel,
+    } : {
       provider: 'deepseek',
       configured: dsKey,
       base: baseOrigin,

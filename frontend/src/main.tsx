@@ -18,6 +18,9 @@ import AlertWorkspacePage from './pages/AlertWorkspace.tsx';
 import AlertDetailPage from './pages/AlertDetail.tsx';
 import CasesPage from './pages/Cases.tsx';
 import CaseDetailPage from './pages/CaseDetail.tsx';
+import ApprovalsPage from './pages/Approvals.tsx';
+import PoliciesPage from './pages/Policies.tsx';
+import AdminSettingsPage from './pages/AdminSettings.tsx';
 import { ThemeProvider } from './store/theme';
 import { worker } from './mocks/browser';
 
@@ -44,6 +47,9 @@ const router = createBrowserRouter([
       { path: 'ingest', element: <IngestPage /> },
       { path: 'alerts-list', element: <AlertsListPage /> }
       ,{ path: 'alerts/:id', element: <AlertDetailPage /> }
+      ,{ path: 'approvals', element: <ApprovalsPage /> }
+      ,{ path: 'policies', element: <PoliciesPage /> }
+      ,{ path: 'admin', element: <AdminSettingsPage /> }
     ]
   },
   { path: '/login', element: <LoginPage /> }

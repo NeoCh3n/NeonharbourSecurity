@@ -1,18 +1,15 @@
 const axios = require('axios');
 const { withRetry, classifyError, parallelMap } = require('./utils/execution');
 
-async function callModel(messages) {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) {
-    console.error('DeepSeek API key not configured');
-    throw new Error('AI service not configured');
-  }
+const { getLLMConfig } = require('./config/llm');
 
-  const baseUrl = (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1').replace(/\/$/, '');
-  const model = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+async function callModel(messages) {
+  const cfg = await getLLMConfig();
+  const baseUrl = cfg.baseUrl;
+  const model = cfg.model;
 
   try {
-    const headers = { Authorization: `Bearer ${apiKey}` };
+    const headers = cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {};
     const doCall = async () => {
       const resp = await axios.post(
         `${baseUrl}/chat/completions`,

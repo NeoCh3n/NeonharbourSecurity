@@ -105,6 +105,30 @@ export const actionsApi = {
   request: (id: number, action: string, reason: string) => apiRequest(`/actions/${id}/request`, { method: 'POST', body: JSON.stringify({ action, reason }) })
 };
 
+export const approvalsApi = {
+  list: () => apiRequest('/approvals'),
+  approve: (id: number) => apiRequest(`/approvals/${id}/approve`, { method: 'POST' }),
+  deny: (id: number, reason: string) => apiRequest(`/approvals/${id}/deny`, { method: 'POST', body: JSON.stringify({ reason }) }),
+};
+
+export type PolicyItem = {
+  id?: number;
+  name: string;
+  description?: string;
+  effect: 'allow' | 'deny' | 'require_approval';
+  action_pattern: string;
+  resource_pattern?: string;
+  conditions?: any;
+  risk?: string;
+};
+export const policiesApi = {
+  list: (): Promise<{ policies: PolicyItem[] }> => apiRequest('/policies'),
+  create: (p: PolicyItem) => apiRequest('/policies', { method: 'POST', body: JSON.stringify(p) }),
+  update: (id: number, p: Partial<PolicyItem>) => apiRequest(`/policies/${id}`, { method: 'PUT', body: JSON.stringify(p) }),
+  remove: (id: number) => apiRequest(`/policies/${id}`, { method: 'DELETE' }),
+  resetDefaults: () => apiRequest('/policies/reset-defaults', { method: 'POST' }),
+};
+
 export type IntegrationItem = { provider: string; enabled: boolean; settings?: any };
 export const integrationsApi = {
   get: (): Promise<{ integrations: IntegrationItem[] }> => apiRequest('/integrations'),

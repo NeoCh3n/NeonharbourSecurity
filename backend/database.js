@@ -184,6 +184,48 @@ async function initDatabase() {
       )
     `);
 
+    // Long-horizon memory: sessions, memories, and case plans
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+        alert_id INTEGER REFERENCES alerts(id) ON DELETE SET NULL,
+        title VARCHAR(255),
+        context JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        closed_at TIMESTAMP
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_sessions_case_id ON sessions (case_id)');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS memories (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+        session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
+        type VARCHAR(50),
+        key TEXT,
+        value JSONB,
+        tags TEXT[],
+        importance REAL DEFAULT 0.5,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_memories_case_id ON memories (case_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_memories_session_id ON memories (session_id)');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS case_plans (
+        case_id INTEGER PRIMARY KEY REFERENCES cases(id) ON DELETE CASCADE,
+        plan JSONB,
+        context_summary TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  
     console.log('Database initialized successfully');
   } catch (error) {
     console.error('Database initialization failed:', error);

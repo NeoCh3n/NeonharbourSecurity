@@ -212,7 +212,7 @@ async function hunterQuery(question, logs = []) {
   };
 }
 
-module.exports = { analyzeAlert, hunterQuery };
+module.exports = { analyzeAlert, hunterQuery, callModel };
 
 /**
  * Map a unified alert to MITRE ATT&CK tactics/techniques using the AI model.

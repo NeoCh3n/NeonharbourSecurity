@@ -139,6 +139,8 @@ const { runPipeline } = require('./pipeline/runPipeline');
 const { upsertCaseForFingerprint, linkAlertToCase } = require('./casing/case_linker');
 const { findSimilarCaseCandidate } = require('./casing/case_linker');
 const { generatePlan, generateRecommendations } = require('./planning/plan');
+const { getOrInitCasePlan, createSession, addMemory, listCaseMemory, getCasePlan, updateCasePlan, listSessions, getSession } = require('./memory/store');
+const { summarizeCaseMemory, summarizeAllCasesForUser } = require('./memory/summarizer');
 const { evaluateAction, checkSegregationOfDuties } = require('./policy/engine');
 const { toolExecutor } = require('./utils/execution');
 const { getTool } = require('./tools');
@@ -165,7 +167,8 @@ async function processAlertsForUser(alertObjs, userId) {
       if (!caseId) {
         caseId = await upsertCaseForFingerprint(unified.fingerprint, unified.severity || 'low');
       }
-      const plan = await generatePlan(unified, analysis);
+      // Long-horizon: reuse or create case plan with memory context
+      const { plan } = await getOrInitCasePlan(caseId, userId, { generatePlanFn: generatePlan, unified, analysis });
       // MITRE ATT&CK mapping via AI
       let mitre = null; let tactic = null; let techniqueStr = unified.technique || null;
       try {
@@ -366,12 +369,19 @@ app.get('/alerts/:id/investigation', authMiddleware, async (req, res) => {
 app.get('/alerts/:id/plan', authMiddleware, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
-    const r = await pool.query('SELECT plan, recommendations, ack_time, investigate_start, resolve_time, raw, summary, timeline, evidence FROM alerts WHERE id=$1 AND user_id=$2', [id, req.user.id]);
+    const r = await pool.query('SELECT plan, recommendations, ack_time, investigate_start, resolve_time, raw, summary, timeline, evidence, case_id FROM alerts WHERE id=$1 AND user_id=$2', [id, req.user.id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const row = r.rows[0];
     row.plan = parseJsonMaybe(row.plan, {});
     row.mitre = parseJsonMaybe(row.mitre, {});
     row.recommendations = parseJsonMaybe(row.recommendations, []);
+    // Prefer case plan if available
+    if (row.case_id) {
+      try {
+        const cp = await getCasePlan(row.case_id);
+        if (cp?.plan) row.plan = cp.plan;
+      } catch {}
+    }
     const needRegen = !row.plan || !Array.isArray(row.plan.questions) || row.plan.questions.length < 3;
     if (needRegen) {
       try {
@@ -379,7 +389,13 @@ app.get('/alerts/:id/plan', authMiddleware, async (req, res) => {
         const { generatePlan } = require('./planning/plan');
         const unified = toUnifiedAlert(parseJsonMaybe(row.raw, {}));
         const analysis = { summary: row.summary, timeline: parseJsonMaybe(row.timeline, []), evidence: parseJsonMaybe(row.evidence, []) };
-        const plan = await generatePlan(unified, analysis);
+        let plan;
+        if (row.case_id) {
+          const res = await getOrInitCasePlan(row.case_id, req.user.id, { generatePlanFn: generatePlan, unified, analysis });
+          plan = res.plan;
+        } else {
+          plan = await generatePlan(unified, analysis);
+        }
         await pool.query('UPDATE alerts SET plan=$1 WHERE id=$2 AND user_id=$3', [JSON.stringify(plan), id, req.user.id]);
         row.plan = plan;
       } catch {}
@@ -395,7 +411,7 @@ app.get('/alerts/:id/plan', authMiddleware, async (req, res) => {
 app.post('/alerts/:id/plan', authMiddleware, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
-    const r = await pool.query('SELECT plan, ack_time, investigate_start, resolve_time FROM alerts WHERE id=$1 AND user_id=$2', [id, req.user.id]);
+    const r = await pool.query('SELECT plan, ack_time, investigate_start, resolve_time, case_id FROM alerts WHERE id=$1 AND user_id=$2', [id, req.user.id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     let plan = parseJsonMaybe(r.rows[0].plan, {});
     const { stepId, done, plan: newPlan } = req.body || {};
@@ -418,6 +434,11 @@ app.post('/alerts/:id/plan', authMiddleware, async (req, res) => {
       'UPDATE alerts SET plan=$1, ack_time=$2, investigate_start=$3, resolve_time=$4 WHERE id=$5 AND user_id=$6 RETURNING plan, ack_time, investigate_start, resolve_time',
       [JSON.stringify(plan || {}), ack, inv, reso, id, req.user.id]
     );
+    // Keep case plan in sync if present
+    const caseId = r.rows[0].case_id;
+    if (caseId) {
+      try { await updateCasePlan(caseId, plan); } catch {}
+    }
     const row = upd.rows[0];
     row.plan = parseJsonMaybe(row.plan, {});
     row.mitre = parseJsonMaybe(row.mitre, {});
@@ -438,6 +459,114 @@ app.get('/integrations', authMiddleware, async (req, res) => {
     res.json({ integrations: r.rows.map(row => ({ provider: row.provider, enabled: !!row.enabled, settings: row.settings || {} })) });
   } catch (error) {
     console.error('Error fetching integrations:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Long-horizon memory: case memory endpoints
+app.get('/cases/:id/memory', authMiddleware, async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  try {
+    const mem = await listCaseMemory(caseId, req.user.id, { limit: 200 });
+    res.json({ memory: mem });
+  } catch (e) {
+    console.error('Error listing memory:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/cases/:id/memory', authMiddleware, async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  const { type = 'note', key = null, value = {}, tags = [], importance = 0.5, sessionId = null } = req.body || {};
+  try {
+    const row = await addMemory({ userId: req.user.id, caseId, sessionId, type, key, value, tags, importance });
+    res.json({ success: true, memory: row });
+  } catch (e) {
+    console.error('Error adding memory:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Sessions per case
+app.get('/cases/:id/sessions', authMiddleware, async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  try {
+    const rows = await listSessions(caseId, req.user.id);
+    res.json({ sessions: rows });
+  } catch (e) {
+    console.error('Error listing sessions:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/cases/:id/sessions', authMiddleware, async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  const { alertId = null, title = null, context = {} } = req.body || {};
+  try {
+    const row = await createSession({ userId: req.user.id, caseId, alertId, title, context });
+    res.json({ success: true, session: row });
+  } catch (e) {
+    console.error('Error creating session:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/sessions/:sessionId', authMiddleware, async (req, res) => {
+  const sessionId = parseInt(req.params.sessionId, 10);
+  try {
+    const row = await getSession(sessionId, req.user.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    res.json(row);
+  } catch (e) {
+    console.error('Error fetching session:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Case plan retrieval and updates
+app.get('/cases/:id/plan', authMiddleware, async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  try {
+    const row = await getCasePlan(caseId);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    res.json(row);
+  } catch (e) {
+    console.error('Error fetching case plan:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/cases/:id/plan', authMiddleware, async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  const { plan } = req.body || {};
+  if (!plan) return res.status(400).json({ error: 'Missing plan' });
+  try {
+    const row = await updateCasePlan(caseId, plan);
+    res.json({ success: true, plan: row.plan, updatedAt: row.updated_at });
+  } catch (e) {
+    console.error('Error updating case plan:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Summarization jobs to keep context concise
+app.post('/cases/:id/summarize', authMiddleware, async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  try {
+    const result = await summarizeCaseMemory(caseId, req.user.id);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    console.error('Error summarizing case:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/jobs/summarize-cases', authMiddleware, async (req, res) => {
+  try {
+    const results = await summarizeAllCasesForUser(req.user.id);
+    res.json({ success: true, results });
+  } catch (e) {
+    console.error('Error running summarize job:', e);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -801,6 +930,8 @@ const port = process.env.PORT || 3000;
 async function startServer() {
   try {
     await initDatabase();
+    // Optional background summarizer cron
+    try { require('./jobs/cron').startSummarizerCron(); } catch {}
     return app.listen(port, () => {
       console.log(`Backend listening on port ${port}`);
     });

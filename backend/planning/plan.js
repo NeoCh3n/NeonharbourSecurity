@@ -1,6 +1,6 @@
 const { callModel: _callModel } = require('../ai');
 
-async function generatePlan(unified, analysis) {
+async function generatePlan(unified, analysis, opts = {}) {
   const now = new Date().toISOString();
   const sev = (unified.severity || 'low').toLowerCase();
   const isHigh = sev === 'high' || sev === 'critical';
@@ -27,7 +27,7 @@ async function generatePlan(unified, analysis) {
   try {
     const prompt = `You are a senior SOC analyst. Given a normalized alert and a brief analysis summary/timeline, produce an investigation plan JSON.
 Return ONLY strict JSON with keys: questions (array of 4-8 concise questions tailored to determine if it's a true positive or false positive and what to do next), steps (array of {id,title,required?}).
-Prefer actionable, context-aware items referring to user, IP, host, URL, file hash if present.\n\nALERT: ${JSON.stringify(unified)}\nANALYSIS: ${JSON.stringify(analysis)}`;
+Prefer actionable, context-aware items referring to user, IP, host, URL, file hash if present.\n\nALERT: ${JSON.stringify(unified)}\nANALYSIS: ${JSON.stringify(analysis)}\n\nPRIOR CONTEXT (optional, memory summary across related alerts/sessions):\n${opts.memorySummary || '(none)'}\n`;
     const ai = await _callModel([
       { role: 'system', content: 'You output only strict JSON. No prose.' },
       { role: 'user', content: prompt }

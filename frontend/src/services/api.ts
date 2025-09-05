@@ -111,4 +111,15 @@ export const integrationsApi = {
   save: (integrations: IntegrationItem[]) => apiRequest('/integrations', { method: 'POST', body: JSON.stringify({ integrations }) })
 };
 
+export const casesApi = {
+  get: (id: number) => apiRequest(`/cases/${id}`),
+  getPlan: (id: number) => apiRequest(`/cases/${id}/plan`),
+  updatePlan: (id: number, plan: any) => apiRequest(`/cases/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan }) }),
+  listMemory: (id: number) => apiRequest(`/cases/${id}/memory`),
+  addMemory: (id: number, payload: any) => apiRequest(`/cases/${id}/memory`, { method: 'POST', body: JSON.stringify(payload) }),
+  listSessions: (id: number) => apiRequest(`/cases/${id}/sessions`),
+  createSession: (id: number, payload: any) => apiRequest(`/cases/${id}/sessions`, { method: 'POST', body: JSON.stringify(payload) }),
+  summarize: (id: number) => apiRequest(`/cases/${id}/summarize`, { method: 'POST' }),
+};
+
 export default apiRequest;

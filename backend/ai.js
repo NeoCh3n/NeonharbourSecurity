@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { withRetry, classifyError, parallelMap } = require('./utils/execution');
 
 async function callModel(messages) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
@@ -12,22 +13,31 @@ async function callModel(messages) {
 
   try {
     const headers = { Authorization: `Bearer ${apiKey}` };
-    const resp = await axios.post(
-      `${baseUrl}/chat/completions`,
-      {
-        model,
-        messages,
-        temperature: 0.1,
-        max_tokens: 1000,
-      },
-      {
-        headers,
-        timeout: 30000,
-      }
-    );
-    return resp.data.choices[0].message.content.trim();
+    const doCall = async () => {
+      const resp = await axios.post(
+        `${baseUrl}/chat/completions`,
+        {
+          model,
+          messages,
+          temperature: 0.1,
+          max_tokens: 1000,
+        },
+        {
+          headers,
+          timeout: 30000,
+        }
+      );
+      return resp.data.choices[0].message.content.trim();
+    };
+    return await withRetry(doCall, {
+      retries: 3,
+      base: 400,
+      factor: 2,
+      shouldRetry: (err, info) => ['timeout', 'network', 'rate_limit', 'server_error'].includes(info.class),
+    });
   } catch (err) {
-    console.error('DeepSeek API call failed:', err.message);
+    const info = classifyError(err);
+    console.error(`DeepSeek API call failed [${info.class}]:`, err.message);
     throw new Error(`AI service unavailable: ${err.message}`);
   }
 }
@@ -52,15 +62,24 @@ async function queryVirusTotal(indicator) {
     : `https://www.virustotal.com/api/v3/files/${indicator}`;
   
   try {
-    const resp = await axios.get(url, { 
-      headers: { 'x-apikey': apiKey },
-      timeout: 10000
+    const doCall = async () => {
+      const resp = await axios.get(url, { 
+        headers: { 'x-apikey': apiKey },
+        timeout: 10000
+      });
+      const data = resp.data.data;
+      const stats = data?.attributes?.last_analysis_stats || {};
+      return { indicator, malicious: stats.malicious || 0, data };
+    };
+    return await withRetry(doCall, {
+      retries: 2,
+      base: 300,
+      factor: 2,
+      shouldRetry: (err, info) => ['timeout', 'network', 'rate_limit', 'server_error'].includes(info.class),
     });
-    const data = resp.data.data;
-    const stats = data?.attributes?.last_analysis_stats || {};
-    return { indicator, malicious: stats.malicious || 0, data };
   } catch (err) {
-    console.warn(`VirusTotal query failed for ${indicator}:`, err.message);
+    const info = classifyError(err);
+    console.warn(`VirusTotal query failed for ${indicator} [${info.class}]:`, err.message);
     return null;
   }
 }
@@ -122,18 +141,17 @@ async function analyzeAlert(alert) {
   const vtEnabled = (vtFlag === '1' || vtFlag === 'true' || vtFlag === 'yes');
   if (vtEnabled && process.env.VIRUSTOTAL_API_KEY) {
     try {
-      const indicators = extractIndicators(alert);
-      for (const ind of indicators.slice(0, 5)) { // Limit to 5 indicators to avoid rate limiting
-        const intel = await queryVirusTotal(ind);
-        if (intel) {
-          timeline.push({
-            step: 'Threat intel lookup',
-            time: new Date().toISOString(),
-            action: 'VirusTotal query',
-            evidence: `${ind} - ${intel.malicious} malicious detection(s)`
-          });
-          evidence.push({ type: 'virustotal', indicator: ind, data: intel });
-        }
+      const indicators = extractIndicators(alert).slice(0, 5);
+      const results = await parallelMap(indicators, (ind) => queryVirusTotal(ind), { concurrency: 3 });
+      for (const intel of results) {
+        if (!intel) continue;
+        timeline.push({
+          step: 'Threat intel lookup',
+          time: new Date().toISOString(),
+          action: 'VirusTotal query',
+          evidence: `${intel.indicator} - ${intel.malicious} malicious detection(s)`
+        });
+        evidence.push({ type: 'virustotal', indicator: intel.indicator, data: intel });
       }
     } catch (error) {
       console.error('Threat intelligence processing failed:', error.message);

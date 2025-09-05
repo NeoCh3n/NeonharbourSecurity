@@ -139,6 +139,10 @@ const { runPipeline } = require('./pipeline/runPipeline');
 const { upsertCaseForFingerprint, linkAlertToCase } = require('./casing/case_linker');
 const { findSimilarCaseCandidate } = require('./casing/case_linker');
 const { generatePlan, generateRecommendations } = require('./planning/plan');
+const { evaluateAction, checkSegregationOfDuties } = require('./policy/engine');
+const { toolExecutor } = require('./utils/execution');
+const { getTool } = require('./tools');
+const { auditLog } = require('./middleware/audit');
 
 // Helper to process and persist alert objects
 async function processAlertsForUser(alertObjs, userId) {
@@ -475,18 +479,120 @@ app.post('/integrations', authMiddleware, async (req, res) => {
 
 // Request an action (human approval flow placeholder)
 app.post('/actions/:id/request', authMiddleware, async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const { action, reason } = req.body || {};
+  const alertId = parseInt(req.params.id, 10);
+  const { action, resource = '*', params = {}, reason } = req.body || {};
   if (!action) return res.status(400).json({ error: 'Missing action' });
   try {
+    const decision = await evaluateAction(req.user.id, action, resource, params?.context || {});
     const traceId = Math.random().toString(36).slice(2);
-    await pool.query(
-      'INSERT INTO audit_logs (action, user_id, details, ip_address) VALUES ($1, $2, $3, $4)',
-      ['action_request', req.user.id, { alertId: id, action, reason, traceId }, req.ip]
+    if (decision.decision === 'deny') {
+      await auditLog('action_denied', req.user.id, { alertId, action, resource, reason: decision.reason, policyId: decision.policyId, ipAddress: req.ip });
+      return res.status(403).json({ error: 'Denied by policy', reason: decision.reason, policyId: decision.policyId });
+    }
+    if (decision.decision === 'allow') {
+      // Execute immediately
+      const tool = getTool(action);
+      if (!tool) return res.status(400).json({ error: 'Unsupported action' });
+      const result = await toolExecutor(action, () => tool(params));
+      await auditLog('action_execute', req.user.id, { alertId, action, resource, result, ipAddress: req.ip });
+      return res.json({ success: true, executed: true, result, traceId });
+    }
+    // require_approval path: create approval request
+    const r = await pool.query(
+      `INSERT INTO approval_requests (user_id, alert_id, action, parameters, status, reason, trace_id)
+       VALUES ($1,$2,$3,$4,'pending',$5,$6) RETURNING id, status`,
+      [req.user.id, alertId, action, JSON.stringify(params || {}), reason || null, traceId]
     );
-    res.json({ success: true, traceId });
+    await auditLog('action_request', req.user.id, { alertId, action, resource, reason, policyId: decision.policyId, ipAddress: req.ip });
+    res.json({ success: true, executed: false, approvalRequestId: r.rows[0].id, status: r.rows[0].status, traceId });
   } catch (error) {
     console.error('Error creating action request:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Execute an action explicitly (will run policy evaluation and/or attach to approval request if provided)
+app.post('/actions/:id/execute', authMiddleware, async (req, res) => {
+  const alertId = parseInt(req.params.id, 10);
+  const { action, resource = '*', params = {}, approvalRequestId = null } = req.body || {};
+  if (!action) return res.status(400).json({ error: 'Missing action' });
+  try {
+    const decision = await evaluateAction(req.user.id, action, resource, params?.context || {});
+    if (decision.decision === 'deny') {
+      await auditLog('action_denied', req.user.id, { alertId, action, resource, reason: decision.reason, policyId: decision.policyId, ipAddress: req.ip });
+      return res.status(403).json({ error: 'Denied by policy', reason: decision.reason, policyId: decision.policyId });
+    }
+    if (decision.decision === 'require_approval') {
+      if (!approvalRequestId) return res.status(403).json({ error: 'Approval required', reason: decision.reason, policyId: decision.policyId });
+      const r = await pool.query('SELECT id, status, user_id FROM approval_requests WHERE id=$1', [approvalRequestId]);
+      if (r.rows.length === 0) return res.status(404).json({ error: 'Approval request not found' });
+      if (r.rows[0].status !== 'approved') return res.status(403).json({ error: 'Approval not granted' });
+    }
+    const tool = getTool(action);
+    if (!tool) return res.status(400).json({ error: 'Unsupported action' });
+    const result = await toolExecutor(action, () => tool(params), { approvalRequestId });
+    await auditLog('action_execute', req.user.id, { alertId, action, resource, approvalRequestId, result, ipAddress: req.ip });
+    res.json({ success: true, result });
+  } catch (error) {
+    console.error('Error executing action:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Approvals list for current user (their requests) and inbox (all pending - simple MVP)
+app.get('/approvals', authMiddleware, async (req, res) => {
+  try {
+    const mine = await pool.query('SELECT * FROM approval_requests WHERE user_id=$1 ORDER BY requested_at DESC', [req.user.id]);
+    const pending = await pool.query('SELECT * FROM approval_requests WHERE status = \'pending\' ORDER BY requested_at DESC');
+    res.json({ mine: mine.rows, inbox: pending.rows });
+  } catch (e) {
+    console.error('Error fetching approvals:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/approvals/:approvalId', authMiddleware, async (req, res) => {
+  const approvalId = parseInt(req.params.approvalId, 10);
+  try {
+    const r = await pool.query('SELECT * FROM approval_requests WHERE id=$1', [approvalId]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json(r.rows[0]);
+  } catch (e) {
+    console.error('Error fetching approval:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/approvals/:approvalId/approve', authMiddleware, async (req, res) => {
+  const approvalId = parseInt(req.params.approvalId, 10);
+  try {
+    const r = await pool.query('SELECT * FROM approval_requests WHERE id=$1', [approvalId]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const reqRow = r.rows[0];
+    if (reqRow.status !== 'pending') return res.status(400).json({ error: 'Request not pending' });
+    const sod = checkSegregationOfDuties(reqRow.user_id, req.user.id);
+    if (!sod.ok) return res.status(403).json({ error: sod.reason });
+    const upd = await pool.query('UPDATE approval_requests SET status=\'approved\', approver_id=$1, decided_at=NOW() WHERE id=$2 RETURNING *', [req.user.id, approvalId]);
+    await auditLog('action_approve', req.user.id, { approvalRequestId: approvalId, ipAddress: req.ip });
+    res.json({ success: true, approval: upd.rows[0] });
+  } catch (e) {
+    console.error('Error approving request:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/approvals/:approvalId/deny', authMiddleware, async (req, res) => {
+  const approvalId = parseInt(req.params.approvalId, 10);
+  const { reason } = req.body || {};
+  try {
+    const r = await pool.query('SELECT * FROM approval_requests WHERE id=$1', [approvalId]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (r.rows[0].status !== 'pending') return res.status(400).json({ error: 'Request not pending' });
+    const upd = await pool.query('UPDATE approval_requests SET status=\'denied\', approver_id=$1, decided_at=NOW(), reason=$2 WHERE id=$3 RETURNING *', [req.user.id, reason || null, approvalId]);
+    await auditLog('action_deny', req.user.id, { approvalRequestId: approvalId, ipAddress: req.ip, reason });
+    res.json({ success: true, approval: upd.rows[0] });
+  } catch (e) {
+    console.error('Error denying request:', e);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

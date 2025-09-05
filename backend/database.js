@@ -137,6 +137,53 @@ async function initDatabase() {
       console.warn('pgvector not available or cannot be enabled:', e.message);
     }
 
+    // Policy and approval workflow tables
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS policies (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        name VARCHAR(200) NOT NULL,
+        description TEXT,
+        effect VARCHAR(30) NOT NULL, -- allow | deny | require_approval
+        action_pattern VARCHAR(200) NOT NULL, -- e.g., disable_account, isolate_*
+        resource_pattern VARCHAR(200),
+        conditions JSONB, -- arbitrary conditions (severity>=high, business_hours, etc.)
+        risk VARCHAR(30), -- low|medium|high|critical
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS approval_requests (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        alert_id INTEGER REFERENCES alerts(id) ON DELETE CASCADE,
+        action VARCHAR(100) NOT NULL,
+        parameters JSONB,
+        status VARCHAR(30) DEFAULT 'pending', -- pending|approved|denied|cancelled|expired
+        reason TEXT,
+        trace_id VARCHAR(64),
+        approver_id INTEGER REFERENCES users(id),
+        requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        decided_at TIMESTAMP
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS action_executions (
+        id SERIAL PRIMARY KEY,
+        approval_request_id INTEGER REFERENCES approval_requests(id) ON DELETE SET NULL,
+        tool VARCHAR(100),
+        request JSONB,
+        response JSONB,
+        status VARCHAR(30), -- success|failure
+        error_class VARCHAR(50),
+        retries INTEGER DEFAULT 0,
+        started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        finished_at TIMESTAMP
+      )
+    `);
+
     console.log('Database initialized successfully');
   } catch (error) {
     console.error('Database initialization failed:', error);

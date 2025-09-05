@@ -95,6 +95,14 @@ app.post('/auth/register', async (req, res) => {
   if (!email || !password) return res.status(400).json({ error: 'Missing email or password' });
   
   try {
+    // Enforce self-registration setting (default true)
+    try {
+      const { getSetting } = require('./config/settings');
+      const s = await getSetting('allowSelfRegister', { allowSelfRegister: true });
+      if (s && s.allowSelfRegister === false) {
+        return res.status(403).json({ error: 'Self-registration is disabled by admin' });
+      }
+    } catch {}
     const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
     if (existingUser.rows.length > 0) return res.status(400).json({ error: 'Email exists' });
     const hashed = await bcrypt.hash(password, 10);
@@ -600,6 +608,30 @@ app.post('/admin/settings/llm', authMiddleware, requireAdmin, async (req, res) =
     res.json({ success: true, provider: p });
   } catch (e) {
     console.error('Error updating LLM setting:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Admin: allow self registration toggle
+app.get('/admin/settings/register', authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const v = await getSetting('allowSelfRegister', { allowSelfRegister: true });
+    res.json({ allowSelfRegister: v && typeof v.allowSelfRegister === 'boolean' ? v.allowSelfRegister : true });
+  } catch (e) {
+    console.error('Error reading register setting:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/admin/settings/register', authMiddleware, requireAdmin, async (req, res) => {
+  const { allowSelfRegister } = req.body || {};
+  const val = !!allowSelfRegister;
+  try {
+    await setSetting('allowSelfRegister', { allowSelfRegister: val });
+    await auditLog('admin_register_toggle', req.user.id, { allowSelfRegister: val, ipAddress: req.ip });
+    res.json({ success: true, allowSelfRegister: val });
+  } catch (e) {
+    console.error('Error updating register setting:', e);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

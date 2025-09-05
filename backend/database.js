@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const bcrypt = require('bcryptjs');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -16,6 +17,8 @@ async function initDatabase() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    // Ensure new columns exist on existing installations
+    try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false'); } catch {}
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS alerts (
@@ -237,6 +240,17 @@ async function initDatabase() {
     `);
   
     console.log('Database initialized successfully');
+    // Ensure default admin user exists
+    try {
+      const r = await pool.query('SELECT id FROM users WHERE email=$1', ['admin']);
+      if (r.rows.length === 0) {
+        const hashed = await bcrypt.hash('admin', 10);
+        await pool.query('INSERT INTO users (email, password, is_admin) VALUES ($1,$2,true)', ['admin', hashed]);
+        console.log('Seeded default admin user: admin / admin');
+      }
+    } catch (e) {
+      console.warn('Failed to ensure default admin user:', e.message);
+    }
   } catch (error) {
     console.error('Database initialization failed:', error);
     throw error;

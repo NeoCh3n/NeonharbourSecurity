@@ -21,45 +21,46 @@ export default function IngestPage() {
     }
   }, []);
 
-  async function ensureLogin() {
+  async function signIn() {
     setBusy(true);
     setStatus('Signing in...');
     try {
-      try {
-        const r = await authApi.login(email, password);
-        if (r?.token) {
-          localStorage.setItem('token', r.token);
-          setStatus('Signed in');
-          setBusy(false);
-          return true;
-        }
-      } catch (e: any) {
-        // If invalid credentials, try to register then login
-        try {
-          await authApi.register(email, password);
-          const r2 = await authApi.login(email, password);
-          if (r2?.token) {
-            localStorage.setItem('token', r2.token);
-            setStatus('Registered & signed in');
-            setBusy(false);
-            return true;
-          }
-        } catch (e2: any) {
-          setStatus('Sign-in failed');
-          setBusy(false);
-          return false;
-        }
+      const r = await authApi.login(email, password);
+      if (r?.token) {
+        localStorage.setItem('token', r.token);
+        setStatus('Signed in');
+        return true;
       }
+      setStatus('Sign-in failed');
+      return false;
+    } catch (e:any) {
+      setStatus('Sign-in failed: ' + (e?.message || e));
+      return false;
     } finally {
       setBusy(false);
     }
-    setBusy(false);
-    setStatus('Sign-in failed');
-    return false;
+  }
+
+  async function registerUser() {
+    setBusy(true);
+    setStatus('Registering...');
+    try {
+      const r = await authApi.register(email, password);
+      if (r?.token) {
+        localStorage.setItem('token', r.token);
+        setStatus('Registered (token issued). You can now sign in.');
+      } else {
+        setStatus('Registered. Now sign in.');
+      }
+    } catch (e:any) {
+      setStatus('Register failed: ' + (e?.message || e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function ingestSamples() {
-    const ok = await ensureLogin();
+    const ok = !!localStorage.getItem('token') || await signIn();
     if (!ok) return;
     setBusy(true);
     setStatus('Ingesting sample alerts...');
@@ -80,7 +81,7 @@ export default function IngestPage() {
   }
 
   async function viewAlerts() {
-    const ok = await ensureLogin();
+    const ok = !!localStorage.getItem('token') || await signIn();
     if (!ok) return;
     navigate('/alerts-list');
   }
@@ -100,7 +101,8 @@ export default function IngestPage() {
           </div>
         </div>
         <div className="mt-3 flex gap-2">
-          <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md btn-gradient" onClick={ensureLogin}>Sign in / Register</button>
+          <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md btn-gradient" onClick={signIn}>Sign In</button>
+          <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={registerUser}>Register</button>
           <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={ingestSamples}>Ingest Samples</button>
           <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={viewAlerts}>View Alerts</button>
         </div>

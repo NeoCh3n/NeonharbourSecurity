@@ -74,11 +74,15 @@ export const alertsApi = {
   },
 
   list: () => apiRequest('/alerts'),
-  queue: (params: { assigned?: 'me'|'unassigned'; status?: string; severity?: string; limit?: number; offset?: number } = {}) => {
+  queue: (params: { assigned?: 'me'|'unassigned'; status?: string; severity?: string; limit?: number; offset?: number; disposition?: string; escalated?: boolean; handled?: boolean; active?: boolean } = {}) => {
     const qs = new URLSearchParams();
     if (params.assigned) qs.set('assigned', params.assigned);
     if (params.status) qs.set('status', params.status);
     if (params.severity) qs.set('severity', params.severity);
+    if (params.disposition) qs.set('disposition', params.disposition);
+    if (params.escalated != null) qs.set('escalated', String(params.escalated));
+    if (params.handled != null) qs.set('handled', String(params.handled));
+    if (params.active != null) qs.set('active', String(params.active));
     if (params.limit != null) qs.set('limit', String(params.limit));
     if (params.offset != null) qs.set('offset', String(params.offset));
     const suffix = qs.toString() ? `?${qs.toString()}` : '';

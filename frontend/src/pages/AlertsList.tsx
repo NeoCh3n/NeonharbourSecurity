@@ -15,7 +15,15 @@ export default function AlertsListPage() {
   const [filter, setFilter] = useState<'all'|'me'|'unassigned'>(fParam === 'me' || fParam === 'unassigned' ? (fParam as any) : 'all');
   async function load() {
     try {
-      const params = filter === 'all' ? {} : { assigned: filter === 'me' ? 'me' : 'unassigned' as any };
+      const params: any = filter === 'all' ? {} : { assigned: filter === 'me' ? 'me' : 'unassigned' };
+      const status = paramsFromUrl('status');
+      const disp = paramsFromUrl('disposition');
+      const escalated = paramsFromUrl('e') || paramsFromUrl('escalated');
+      const handled = paramsFromUrl('handled');
+      if (status) params.status = status;
+      if (disp) params.disposition = disp;
+      if (escalated) params.escalated = true;
+      if (handled) params.handled = true;
       const data = await alertsApi.queue(params);
       const list: Row[] = data.alerts || [];
       list.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -23,6 +31,10 @@ export default function AlertsListPage() {
     } catch (e: any) {
       setError(e?.message || '加载失败');
     }
+  }
+  function paramsFromUrl(key: string): string | null {
+    const u = new URLSearchParams(window.location.search);
+    return u.get(key);
   }
   useEffect(() => { void load(); }, [filter]);
   useEffect(() => { setParams({ f: filter }, { replace: true }); }, [filter]);

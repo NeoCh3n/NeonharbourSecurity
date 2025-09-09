@@ -5,6 +5,7 @@ import { AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveCont
 import type { ColumnDef } from '@tanstack/react-table';
 import { DataTable } from '../components/datatable/DataTable';
 import { useUI } from '../store/ui';
+import { useNavigate } from 'react-router-dom';
 import { alertsApi, metricsApi } from '../services/api';
 
 type TrendPoint = { day: string; alerts: number };
@@ -12,6 +13,7 @@ type TrendPoint = { day: string; alerts: number };
 export default function DashboardPage() {
   const setRight = useUI(s => s.setRightPanelOpen);
   const [rangeDays, setRangeDays] = useState<number>(30);
+  const navigate = useNavigate();
 
   const metricsQ = useQuery({
     queryKey: ['metrics'],
@@ -60,9 +62,13 @@ export default function DashboardPage() {
 
   // Note: status distribution available via metrics if needed for future panels
 
-  // KPI hero values (aligns to the target layout)
+  // KPI hero values (clickable)
   const totalInvestigations = metricsQ.data?.totalAlerts ?? 0;
   const resolvedCount = (metricsQ.data?.resolvedCount as number) ?? (metricsQ.data?.statusCounts?.resolved as number) ?? 0;
+  const handledCount = metricsQ.data?.handledCount ?? resolvedCount;
+  const escalatedCount = metricsQ.data?.escalatedCount ?? 0;
+  const uncertainCount = metricsQ.data?.uncertainCount ?? 0;
+  const activeCount = Math.max(0, totalInvestigations - handledCount);
 
   // Simple N-day over previous-N-day delta from trend
   function pctDeltaFromTrend(points: TrendPoint[]): number {
@@ -127,30 +133,34 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* KPI hero strip */}
+      {/* KPI cards (clickable) */}
       <section className="grid grid-cols-12 gap-3">
-        <div className="col-span-12 lg:col-span-6 bg-surface rounded-lg border border-border p-4 shadow-sm">
-          <div className="text-sm text-muted mb-1 flex items-center gap-2">
-            <span>ⓘ</span>
-            <span>Total investigations</span>
-          </div>
-          <div className="flex items-end justify-between">
-            <div className="text-5xl leading-none font-semibold">{totalInvestigations}</div>
-            <div className="text-sm" style={{ color: kpiDelta >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-              {kpiDelta >= 0 ? '▲' : '▼'} {Math.abs(kpiDelta).toFixed(1)}%
-            </div>
-          </div>
-        </div>
-        <div className="col-span-12 lg:col-span-6 bg-surface rounded-lg border border-border p-4 shadow-sm">
-          <div className="text-sm text-muted mb-1 flex items-center gap-2">
-            <span>⚙️</span>
-            <span>Resolved</span>
-          </div>
-          <div className="flex items-end justify-between">
-            <div className="text-5xl leading-none font-semibold">{resolvedCount}</div>
-            <div className="text-sm" style={{ color: 'var(--success)' }}>▲ {Math.max(0, kpiDelta).toFixed(1)}%</div>
-          </div>
-        </div>
+        <KpiCard
+          className="col-span-12 md:col-span-3"
+          title="Active"
+          value={activeCount}
+          hint={`${totalInvestigations} total`}
+          onClick={() => navigate('/alerts-list?f=all&active=1')}
+        />
+        <KpiCard
+          className="col-span-12 md:col-span-3"
+          title="Handled"
+          value={handledCount}
+          hint={`${resolvedCount} resolved/closed`}
+          onClick={() => navigate('/alerts-list?f=all&handled=1')}
+        />
+        <KpiCard
+          className="col-span-12 md:col-span-3"
+          title="Escalated"
+          value={escalatedCount}
+          onClick={() => navigate('/alerts-list?f=all&e=1')}
+        />
+        <KpiCard
+          className="col-span-12 md:col-span-3"
+          title="Uncertain"
+          value={uncertainCount}
+          onClick={() => navigate('/alerts-list?f=all&disposition=uncertain')}
+        />
       </section>
 
       {/* Full-width investigations trend */}
@@ -224,6 +234,18 @@ export default function DashboardPage() {
           </ChartFrame>
         </div>
       </section>
+    </div>
+  );
+}
+
+function KpiCard({ title, value, hint, className = '', onClick }: { title: string; value: number; hint?: string; className?: string; onClick?: () => void }) {
+  return (
+    <div className={`${className} bg-surface rounded-lg border border-border p-4 shadow-sm cursor-pointer hover:bg-surfaceAlt transition`} onClick={onClick} role="button" tabIndex={0} onKeyDown={(e)=>{ if (e.key==='Enter') onClick?.(); }}>
+      <div className="text-sm text-muted mb-1 flex items-center gap-2">
+        <span>{title}</span>
+        {hint && <span className="ml-auto text-xs text-muted">{hint}</span>}
+      </div>
+      <div className="text-5xl leading-none font-semibold">{value}</div>
     </div>
   );
 }

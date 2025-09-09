@@ -435,7 +435,7 @@ app.get('/alerts', authMiddleware, async (req, res) => {
 
 // Team triage queue with filters and ordering by severity and recency
 app.get('/alerts/queue', authMiddleware, async (req, res) => {
-  const { status, severity, assigned, limit = 100, offset = 0 } = req.query;
+  const { status, severity, assigned, limit = 100, offset = 0, disposition, escalated, handled, active } = req.query;
   const where = ['tenant_id = $1'];
   const params = [req.tenantId];
   let p = 2;
@@ -443,6 +443,10 @@ app.get('/alerts/queue', authMiddleware, async (req, res) => {
   if (severity) { where.push(`severity = $${p++}`); params.push(String(severity)); }
   if (assigned === 'unassigned') { where.push('assigned_to IS NULL'); }
   else if (assigned === 'me') { where.push(`assigned_to = $${p++}`); params.push(req.user.id); }
+  if (disposition) { where.push(`disposition = $${p++}`); params.push(String(disposition)); }
+  if (String(escalated || '').toLowerCase() === '1' || String(escalated || '').toLowerCase() === 'true') { where.push('escalated = TRUE'); }
+  if (String(handled || '').toLowerCase() === '1' || String(handled || '').toLowerCase() === 'true') { where.push(`status IN ('resolved','closed')`); }
+  if (String(active || '').toLowerCase() === '1' || String(active || '').toLowerCase() === 'true') { where.push(`COALESCE(status,'') NOT IN ('resolved','closed')`); }
   const sql = `
     SELECT id, created_at as "createdAt", source, status, severity, summary, assigned_to as "assignedTo"
     FROM alerts
@@ -1170,6 +1174,19 @@ app.get('/metrics', authMiddleware, async (req, res) => {
     const acknowledgedCount = parseInt(acknowledgedResult.rows[0].acknowledged || 0);
     const backlogCount = Math.max(0, totalAlerts - resolvedCount);
 
+    // New: disposition and escalation metrics
+    const dispositionCounts = {};
+    try {
+      const disp = await pool.query('SELECT disposition, COUNT(*)::int AS count FROM alerts WHERE tenant_id=$1 GROUP BY disposition', [req.tenantId]);
+      disp.rows.forEach(r => { dispositionCounts[r.disposition || 'unknown'] = r.count; });
+    } catch {}
+    const handledCount = resolvedCount; // treat resolved as handled (closed also included below)
+    const closedResult = await pool.query("SELECT COUNT(*)::int AS c FROM alerts WHERE tenant_id=$1 AND status='closed'", [req.tenantId]);
+    const handledTotal = handledCount + (closedResult.rows[0]?.c || 0);
+    const escalatedResult = await pool.query('SELECT COUNT(*)::int AS c FROM alerts WHERE tenant_id=$1 AND escalated=TRUE', [req.tenantId]);
+    const escalatedCount = escalatedResult.rows[0]?.c || 0;
+    const uncertainCount = (dispositionCounts['uncertain'] || 0);
+
     res.json({
       totalAlerts,
       severityCounts,
@@ -1182,7 +1199,11 @@ app.get('/metrics', authMiddleware, async (req, res) => {
       feedbackScore,
       avgAnalysisTime: timeResult.rows[0].avg_time ? parseFloat(timeResult.rows[0].avg_time) : 0,
       mttiSec: mttiResult.rows[0].mtti_sec ? parseFloat(mttiResult.rows[0].mtti_sec) : 0,
-      mttrSec: mttrResult.rows[0].mttr_sec ? parseFloat(mttrResult.rows[0].mttr_sec) : 0
+      mttrSec: mttrResult.rows[0].mttr_sec ? parseFloat(mttrResult.rows[0].mttr_sec) : 0,
+      dispositionCounts,
+      handledCount: handledTotal,
+      escalatedCount,
+      uncertainCount
     });
   } catch (error) {
     console.error('Error fetching metrics:', error);

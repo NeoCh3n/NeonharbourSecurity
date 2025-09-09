@@ -176,7 +176,10 @@ async function initDatabase() {
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS resolve_time TIMESTAMP",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS embedding JSONB",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS embedding_text TEXT",
-      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS mitre JSONB"
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS mitre JSONB",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS assigned_to INTEGER REFERENCES users(id)",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS priority VARCHAR(20)",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS tags TEXT[]"
     ];
     for (const sql of alterSqls) {
       try { await pool.query(sql); } catch {}
@@ -187,6 +190,8 @@ async function initDatabase() {
     await pool.query('CREATE INDEX IF NOT EXISTS idx_alerts_case_id ON alerts (case_id)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_alerts_tenant_created_at ON alerts (tenant_id, created_at)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_alerts_tenant_status ON alerts (tenant_id, status)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_alerts_tenant_assigned ON alerts (tenant_id, assigned_to)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_alerts_tenant_priority ON alerts (tenant_id, priority)');
 
     // Try to enable pgvector if available (optional)
     try {

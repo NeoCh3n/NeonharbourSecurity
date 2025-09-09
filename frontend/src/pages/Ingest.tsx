@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { authApi } from '../services/api';
+import { useAuth } from '../store/auth';
 import apiRequest, { alertsApi, integrationsApi, IntegrationItem } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
@@ -11,28 +12,34 @@ export default function IngestPage() {
   const [integrations, setIntegrations] = useState<IntegrationItem[]>([]);
   const [savingIntegrations, setSavingIntegrations] = useState(false);
   const navigate = useNavigate();
+  const { me, login, register, refresh } = useAuth();
 
   useEffect(() => {
     const t = localStorage.getItem('token');
     if (t) setStatus('Signed in / Token present');
-    // Load integrations if logged in
+    if (t) { integrationsApi.get().then(d => setIntegrations(d.integrations || [])).catch(()=>{}); }
+    void refresh();
+  }, []);
+
+  useEffect(() => {
+    // When user changes, refresh integrations and status banner
+    const t = localStorage.getItem('token');
     if (t) {
       integrationsApi.get().then(d => setIntegrations(d.integrations || [])).catch(()=>{});
+      setStatus(`Signed in${me?.email ? ' as ' + me.email : ''}`);
+    } else {
+      setStatus('Not signed in');
+      setIntegrations([]);
     }
-  }, []);
+  }, [me?.id]);
 
   async function signIn() {
     setBusy(true);
     setStatus('Signing in...');
     try {
-      const r = await authApi.login(email, password);
-      if (r?.token) {
-        localStorage.setItem('token', r.token);
-        setStatus('Signed in');
-        return true;
-      }
-      setStatus('Sign-in failed');
-      return false;
+      await login(email, password);
+      setStatus('Signed in');
+      return true;
     } catch (e:any) {
       setStatus('Sign-in failed: ' + (e?.message || e));
       return false;
@@ -45,13 +52,8 @@ export default function IngestPage() {
     setBusy(true);
     setStatus('Registering...');
     try {
-      const r = await authApi.register(email, password);
-      if (r?.token) {
-        localStorage.setItem('token', r.token);
-        setStatus('Registered (token issued). You can now sign in.');
-      } else {
-        setStatus('Registered. Now sign in.');
-      }
+      await register(email, password);
+      setStatus('Registered (token issued). You can now sign in.');
     } catch (e:any) {
       setStatus('Register failed: ' + (e?.message || e));
     } finally {
@@ -88,24 +90,43 @@ export default function IngestPage() {
 
   return (
     <div className="space-y-3">
+      <div className="bg-surface rounded-lg border border-border p-3 flex items-center justify-between">
+        <div className="text-sm text-muted">In-Browser Validation</div>
+        <div className="text-sm">
+          {me ? (
+            <span>Signed in as <span className="font-medium">{me.email}</span> · Tenant <span className="font-medium">{me.currentTenantId ?? '-'}</span></span>
+          ) : (
+            <span className="text-muted">Not signed in</span>
+          )}
+        </div>
+      </div>
       <div className="bg-surface rounded-lg border border-border p-3 shadow-sm">
         <div className="text-sm text-muted mb-2">In-Browser Validation</div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-sm text-muted mb-1">Email</label>
-            <input className="w-full border border-border rounded-md px-3 py-2 bg-surface text-text" value={email} onChange={e => setEmail(e.target.value)} />
+        {!me ? (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm text-muted mb-1">Email</label>
+                <input className="w-full border border-border rounded-md px-3 py-2 bg-surface text-text" value={email} onChange={e => setEmail(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-sm text-muted mb-1">Password</label>
+                <input type="password" className="w-full border border-border rounded-md px-3 py-2 bg-surface text-text" value={password} onChange={e => setPassword(e.target.value)} />
+              </div>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md btn-gradient" onClick={signIn}>Sign In</button>
+              <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={registerUser}>Register</button>
+              <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={viewAlerts}>View Alerts</button>
+            </div>
+          </>
+        ) : (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted">Signed in as</span> <span className="px-2 py-0.5 rounded bg-surfaceAlt border border-border">{me.email}</span>
+            <button className="ml-2 px-3 py-1.5 border border-border rounded-md" onClick={ingestSamples}>Ingest Samples</button>
+            <button className="px-3 py-1.5 border border-border rounded-md" onClick={viewAlerts}>View Alerts</button>
           </div>
-          <div>
-            <label className="block text-sm text-muted mb-1">Password</label>
-            <input type="password" className="w-full border border-border rounded-md px-3 py-2 bg-surface text-text" value={password} onChange={e => setPassword(e.target.value)} />
-          </div>
-        </div>
-        <div className="mt-3 flex gap-2">
-          <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md btn-gradient" onClick={signIn}>Sign In</button>
-          <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={registerUser}>Register</button>
-          <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={ingestSamples}>Ingest Samples</button>
-          <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={viewAlerts}>View Alerts</button>
-        </div>
+        )}
         <div className="text-sm text-muted mt-2">{status}</div>
       </div>
       <div className="bg-surface rounded-lg border border-border p-3">

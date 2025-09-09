@@ -1,5 +1,6 @@
 import { useTheme } from '../../store/theme';
 import { useUI } from '../../store/ui';
+import { UserMenu } from './UserMenu';
 
 export function Topbar() {
   const { theme, setTheme } = useTheme();
@@ -21,6 +22,7 @@ export function Topbar() {
           <option value="theme-dark">Dark</option>
           <option value="theme-hc">High Contrast</option>
         </select>
+        <UserMenu />
       </div>
     </header>
   );

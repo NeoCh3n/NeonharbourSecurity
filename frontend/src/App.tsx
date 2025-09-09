@@ -5,11 +5,13 @@ import { RightPanel } from './components/shell/RightPanel';
 import { useUI } from './store/ui';
 import { useEffect } from 'react';
 import { Analytics } from './components/integrations/Analytics';
+import { useAuth } from './store/auth';
 
 export default function App() {
   const rightPanelOpen = useUI(s => s.rightPanelOpen);
   const location = useLocation();
   const navigate = useNavigate();
+  const { refresh } = useAuth();
 
   // Example: redirect unknown root to dashboard
   useEffect(() => {
@@ -17,6 +19,9 @@ export default function App() {
       navigate('/plan', { replace: true });
     }
   }, [location.pathname, navigate]);
+
+  // Load current user on app mount (keeps header/user info in sync)
+  useEffect(() => { void refresh(); }, [refresh]);
 
   return (
     <div className="desktop-frame min-h-full grid" style={{ gridTemplateRows: '56px 1fr' }}>

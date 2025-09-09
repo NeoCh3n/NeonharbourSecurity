@@ -39,21 +39,30 @@ const corsOrigin = (origin, cb) => {
 };
 app.use(cors({ origin: corsOrigin, credentials: true }));
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
-});
-app.use(limiter);
+// Rate limiting (configurable)
+function toBool(v) { const s = String(v || '').toLowerCase(); return ['1','true','yes','on'].includes(s); }
+const GLOBAL_RATE_LIMIT_WINDOW_MS = parseInt(process.env.GLOBAL_RATE_LIMIT_WINDOW_MS || '900000', 10);
+const GLOBAL_RATE_LIMIT_MAX = parseInt(process.env.GLOBAL_RATE_LIMIT_MAX || (process.env.NODE_ENV !== 'production' ? '0' : '100'), 10);
+const AUTH_RATE_LIMIT_WINDOW_MS = parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || '900000', 10);
+const AUTH_RATE_LIMIT_MAX = parseInt(process.env.AUTH_RATE_LIMIT_MAX || (process.env.NODE_ENV !== 'production' ? '50' : '5'), 10);
 
-// More aggressive rate limiting for auth endpoints
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5, // limit to 5 attempts per window
-  message: 'Too many authentication attempts, please try again later.'
-});
-app.use('/auth/', authLimiter);
+if (!toBool(process.env.DISABLE_GLOBAL_RATE_LIMIT) && GLOBAL_RATE_LIMIT_MAX > 0) {
+  const limiter = rateLimit({
+    windowMs: GLOBAL_RATE_LIMIT_WINDOW_MS,
+    max: GLOBAL_RATE_LIMIT_MAX,
+    message: 'Too many requests from this IP, please try again later.'
+  });
+  app.use(limiter);
+}
+
+if (!toBool(process.env.DISABLE_AUTH_RATE_LIMIT) && AUTH_RATE_LIMIT_MAX > 0) {
+  const authLimiter = rateLimit({
+    windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+    max: AUTH_RATE_LIMIT_MAX,
+    message: 'Too many authentication attempts, please try again later.'
+  });
+  app.use('/auth/', authLimiter);
+}
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -175,8 +184,26 @@ app.post('/auth/login', async (req, res) => {
   }
 });
 
-app.get('/auth/me', authMiddleware, (req, res) => {
-  res.json({ id: req.user.id, email: req.user.email, isAdmin: !!req.user.is_admin });
+app.get('/auth/me', authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT ut.tenant_id as id, t.name, t.slug, ut.role
+       FROM user_tenants ut JOIN tenants t ON t.id = ut.tenant_id
+       WHERE ut.user_id = $1
+       ORDER BY CASE WHEN ut.role='admin' THEN 0 ELSE 1 END, t.id ASC`,
+      [req.user.id]
+    );
+    res.json({
+      id: req.user.id,
+      email: req.user.email,
+      isAdmin: !!req.user.is_admin,
+      currentTenantId: req.tenantId || null,
+      currentTenantRole: req.tenantRole || null,
+      tenants: r.rows || []
+    });
+  } catch (e) {
+    res.json({ id: req.user.id, email: req.user.email, isAdmin: !!req.user.is_admin, currentTenantId: req.tenantId || null, currentTenantRole: req.tenantRole || null, tenants: [] });
+  }
 });
 
 const { runPipeline } = require('./pipeline/runPipeline');
@@ -190,6 +217,16 @@ const { evaluateAction, checkSegregationOfDuties, getPoliciesForUser, ensureDefa
 const { toolExecutor } = require('./utils/execution');
 const { getTool } = require('./tools');
 const { auditLog } = require('./middleware/audit');
+
+function severityOrder(sev) {
+  switch (String(sev || '').toLowerCase()) {
+    case 'critical': return 4;
+    case 'high': return 3;
+    case 'medium': return 2;
+    case 'low': return 1;
+    default: return 0;
+  }
+}
 
 // Helper to process and persist alert objects
 async function processAlertsForUser(alertObjs, userId, tenantId) {
@@ -329,12 +366,103 @@ app.post('/alerts/ingest', authMiddleware, async (req, res) => {
 app.get('/alerts', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, created_at as "createdAt", source, status, severity FROM alerts WHERE tenant_id = $1 ORDER BY created_at DESC',
+      'SELECT id, created_at as "createdAt", source, status, severity, assigned_to as "assignedTo" FROM alerts WHERE tenant_id = $1 ORDER BY created_at DESC',
       [req.tenantId]
     );
     res.json({ alerts: result.rows });
   } catch (error) {
     console.error('Error fetching alerts:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Team triage queue with filters and ordering by severity and recency
+app.get('/alerts/queue', authMiddleware, async (req, res) => {
+  const { status, severity, assigned, limit = 100, offset = 0 } = req.query;
+  const where = ['tenant_id = $1'];
+  const params = [req.tenantId];
+  let p = 2;
+  if (status) { where.push(`status = $${p++}`); params.push(String(status)); }
+  if (severity) { where.push(`severity = $${p++}`); params.push(String(severity)); }
+  if (assigned === 'unassigned') { where.push('assigned_to IS NULL'); }
+  else if (assigned === 'me') { where.push(`assigned_to = $${p++}`); params.push(req.user.id); }
+  const sql = `
+    SELECT id, created_at as "createdAt", source, status, severity, summary, assigned_to as "assignedTo"
+    FROM alerts
+    WHERE ${where.join(' AND ')}
+    ORDER BY CASE LOWER(severity) WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC,
+             created_at DESC
+    LIMIT $${p++} OFFSET $${p++}`;
+  params.push(Math.max(1, parseInt(String(limit), 10)));
+  params.push(Math.max(0, parseInt(String(offset), 10)));
+  try {
+    const r = await pool.query(sql, params);
+    res.json({ alerts: r.rows });
+  } catch (e) {
+    console.error('Error fetching triage queue:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Assign alert to a user within the same tenant
+app.post('/alerts/:id/assign', authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { userId } = req.body || {};
+  if (!userId) return res.status(400).json({ error: 'Missing userId' });
+  try {
+    const check = await pool.query('SELECT 1 FROM user_tenants WHERE user_id=$1 AND tenant_id=$2', [userId, req.tenantId]);
+    if (check.rows.length === 0) return res.status(400).json({ error: 'User not in this tenant' });
+    const upd = await pool.query('UPDATE alerts SET assigned_to=$1 WHERE id=$2 AND tenant_id=$3 RETURNING id, assigned_to as "assignedTo"', [userId, id, req.tenantId]);
+    if (upd.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    await auditLog('alert_assign', req.user.id, { alertId: id, assignedTo: userId, ipAddress: req.ip }, req.tenantId);
+    res.json({ success: true, alert: upd.rows[0] });
+  } catch (e) {
+    console.error('Error assigning alert:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Bulk acknowledge alerts in tenant
+app.post('/alerts/bulk/ack', authMiddleware, async (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'Missing ids' });
+  try {
+    const r = await pool.query(
+      `UPDATE alerts SET ack_time=COALESCE(ack_time, NOW()), status='acknowledged' 
+       WHERE tenant_id=$1 AND id = ANY($2::int[]) RETURNING id`,
+      [req.tenantId, ids.map((x) => parseInt(x, 10)).filter(Number.isFinite)]
+    );
+    await auditLog('alerts_bulk_ack', req.user.id, { count: r.rows.length, ipAddress: req.ip }, req.tenantId);
+    res.json({ success: true, count: r.rows.length });
+  } catch (e) {
+    console.error('Error bulk ack:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update alert status; auto-stamp key lifecycle times
+app.post('/alerts/:id/status', authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { status } = req.body || {};
+  if (!status) return res.status(400).json({ error: 'Missing status' });
+  const s = String(status).toLowerCase();
+  const allowed = new Set(['new','needs_review','acknowledged','investigating','resolved','closed']);
+  if (!allowed.has(s)) return res.status(400).json({ error: 'Invalid status' });
+  try {
+    const row = await pool.query('SELECT ack_time, investigate_start, resolve_time FROM alerts WHERE id=$1 AND tenant_id=$2', [id, req.tenantId]);
+    if (row.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    let { ack_time: ack, investigate_start: inv, resolve_time: reso } = row.rows[0];
+    if (s === 'acknowledged' && !ack) ack = new Date();
+    if (s === 'investigating' && !inv) inv = new Date();
+    if (s === 'resolved' && !reso) reso = new Date();
+    const upd = await pool.query(
+      'UPDATE alerts SET status=$1, ack_time=$2, investigate_start=$3, resolve_time=$4 WHERE id=$5 AND tenant_id=$6 RETURNING id, status, ack_time as "ackTime", investigate_start as "investigateStart", resolve_time as "resolveTime"',
+      [s, ack, inv, reso, id, req.tenantId]
+    );
+    await auditLog('alert_status_update', req.user.id, { alertId: id, status: s, ipAddress: req.ip }, req.tenantId);
+    res.json({ success: true, alert: upd.rows[0] });
+  } catch (e) {
+    console.error('Error updating status:', e);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -1,34 +1,29 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../store/auth';
+import { authApi } from '../services/api';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
-  const [mfaNeeded, setMfaNeeded] = useState(false);
-  const [mfaCode, setMfaCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { login, register, loading } = useAuth();
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     if (!username || !password) {
       setError('请输入用户名和密码 / Username and password required');
       return;
     }
-    // Simulate MFA requirement for demo
-    if (!mfaNeeded) {
-      setMfaNeeded(true);
-      return;
+    try {
+      await login(username, password);
+      navigate('/report', { replace: true });
+    } catch (e: any) {
+      setError(e?.message || '登录失败 / Login failed');
     }
-    if (mfaCode.length < 6) {
-      setError('请输入 6 位 MFA 验证码 / Enter 6-digit MFA code');
-      return;
-    }
-    // Success
-    navigate('/dashboard');
-    // In real app: show toast with last login time/location and traceId
   }
 
   return (
@@ -56,18 +51,15 @@ export default function LoginPage() {
             </div>
             <div className="text-xs text-muted mt-1">CapsLock 检测 / Paste 检测（示意）</div>
           </div>
-          {mfaNeeded && (
-            <div>
-              <label className="block text-sm text-muted mb-1">MFA（TOTP/SMS/Key）</label>
-              <input inputMode="numeric" maxLength={6} className="w-full border border-border rounded-md px-3 py-2 bg-surface text-text focus-ring" value={mfaCode} onChange={e => setMfaCode(e.target.value)} />
-            </div>
-          )}
           {error && <div role="alert" className="text-danger text-sm">{error}</div>}
-          <button type="submit" className="w-full bg-primary text-primaryFg rounded-md py-2 hover:opacity-90">登录 / Sign In</button>
+          <button disabled={loading} type="submit" className="w-full bg-primary text-primaryFg rounded-md py-2 hover:opacity-90">登录 / Sign In</button>
           <div className="text-xs text-muted">SSO、隐私与条款、traceId 占位</div>
+          <div className="text-xs text-muted">No account? <button type="button" className="underline" onClick={async ()=>{
+            try { await register(username || 'demo@local', password || 'demo1234'); navigate('/report', { replace: true }); }
+            catch (e: any) { setError(e?.message || '注册失败 / Register failed'); }
+          }}>Register</button></div>
         </form>
       </section>
     </div>
   );
 }
-

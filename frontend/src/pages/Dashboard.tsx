@@ -163,10 +163,10 @@ export default function DashboardPage() {
         />
       </section>
 
-      {/* Full-width investigations trend */}
+      {/* 2x2 layout for core insights */}
       <section className="grid grid-cols-12 gap-3">
-        <div className="col-span-12">
-          <ChartFrame title="Total investigations">
+        <div className="col-span-12 lg:col-span-6">
+          <ChartFrame title="Total Investigations" actions={<a className="text-xs underline" href="/alerts-list">View list</a>} height={260}>
             <ResponsiveContainer width="100%" height="100%">
               {alertsQ.isLoading ? (
                 <ChartSkeleton />
@@ -181,12 +181,24 @@ export default function DashboardPage() {
             </ResponsiveContainer>
           </ChartFrame>
         </div>
-      </section>
-
-      {/* Full-width ingested alerts */}
-      <section className="grid grid-cols-12 gap-3">
-        <div className="col-span-12">
-          <ChartFrame title="Ingested Alerts">
+        <div className="col-span-12 lg:col-span-6">
+          <ChartFrame title="Alerts by Source" actions={<a className="text-xs underline" href="/alerts-list">View list</a>} height={260}>
+            <ResponsiveContainer width="100%" height="100%">
+              {alertsQ.isLoading ? (
+                <ChartSkeleton />
+              ) : (
+                <BarChart data={sourceRows}>
+                  <XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0}/>
+                  <YAxis width={40}/>
+                  <Tooltip />
+                  <Bar dataKey="count" fill="#2D6AE3" />
+                </BarChart>
+              )}
+            </ResponsiveContainer>
+          </ChartFrame>
+        </div>
+        <div className="col-span-12 lg:col-span-6">
+          <ChartFrame title="Ingested Alerts" actions={<a className="text-xs underline" href="/alerts-list">View list</a>} height={260}>
             <ResponsiveContainer width="100%" height="100%">
               {alertsQ.isLoading ? (
                 <ChartSkeleton />
@@ -207,31 +219,14 @@ export default function DashboardPage() {
             </ResponsiveContainer>
           </ChartFrame>
         </div>
-      </section>
-
-      {/* Bottom split: Top 10 Alerts and Alerts by Source */}
-      <section className="grid grid-cols-12 gap-3">
         <div className="col-span-12 lg:col-span-6">
           <section className="bg-surface rounded-lg border border-border p-3 shadow-sm">
-            <div className="text-sm text-muted mb-2">Top 10 Alerts</div>
-            <DataTable columns={columns} data={top10} height={320} />
+            <div className="flex items-center mb-2">
+              <div className="text-sm text-muted">Top 10 Alerts</div>
+              <a className="ml-auto text-xs underline" href="/alerts-list">View list</a>
+            </div>
+            <DataTable columns={columns} data={top10} height={260} />
           </section>
-        </div>
-        <div className="col-span-12 lg:col-span-6">
-          <ChartFrame title="Alerts by Source">
-            <ResponsiveContainer width="100%" height="100%">
-              {alertsQ.isLoading ? (
-                <ChartSkeleton />
-              ) : (
-                <BarChart data={sourceRows}>
-                  <XAxis dataKey="name" tick={{ fontSize: 12 }} interval={0}/>
-                  <YAxis width={40}/>
-                  <Tooltip />
-                  <Bar dataKey="count" fill="#2D6AE3" />
-                </BarChart>
-              )}
-            </ResponsiveContainer>
-          </ChartFrame>
         </div>
       </section>
     </div>

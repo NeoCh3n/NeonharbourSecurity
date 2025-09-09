@@ -1,25 +1,31 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { alertsApi } from '../services/api';
 import apiRequest, { planApi, actionsApi } from '../services/api';
 
-type Row = { id: number; createdAt: string; source: string; status: string; severity: string };
+type Row = { id: number; createdAt: string; source: string; status: string; severity: string; assignedTo?: number|null };
 
 export default function AlertsListPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    alertsApi.list()
-      .then((data: any) => {
-        const list: Row[] = data.alerts || [];
-        // Ensure newest at top in UI even if backend changes default
-        list.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setRows(list);
-      })
-      .catch((e: any) => setError(e?.message || '加载失败'));
-  }, []);
+  const [params, setParams] = useSearchParams();
+  const initial = (params.get('f') as any) || 'all';
+  const [filter, setFilter] = useState<'all'|'me'|'unassigned'>(initial === 'me' || initial === 'unassigned' ? initial : 'all');
+  async function load() {
+    try {
+      const params = filter === 'all' ? {} : { assigned: filter === 'me' ? 'me' : 'unassigned' as any };
+      const data = await alertsApi.queue(params);
+      const list: Row[] = data.alerts || [];
+      list.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setRows(list);
+    } catch (e: any) {
+      setError(e?.message || '加载失败');
+    }
+  }
+  useEffect(() => { void load(); }, [filter]);
+  useEffect(() => { setParams({ f: filter }, { replace: true }); }, [filter]);
 
   async function openDetail(id: number) {
     // Navigate to modern detail page; immediate route change provides timely feedback
@@ -30,9 +36,17 @@ export default function AlertsListPage() {
 
   return (
     <div className="space-y-3">
-      <div className="bg-surface rounded-lg border border-border p-3 shadow-sm flex items-center justify-between">
-        <div className="font-semibold">Alerts</div>
-        <div className="text-sm text-muted">Newest appear on top</div>
+      <div className="bg-surface rounded-lg border border-border p-3 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div className="font-semibold">Triage</div>
+          <div className="text-sm text-muted">Newest appear on top</div>
+        </div>
+        <div className="mt-2 flex items-center gap-2 text-sm">
+          <button className={`px-2 py-1 rounded-md border ${filter==='all'?'btn-gradient border-border':'border-border'}`} onClick={()=>setFilter('all')}>All</button>
+          <button className={`px-2 py-1 rounded-md border ${filter==='me'?'btn-gradient border-border':'border-border'}`} onClick={()=>setFilter('me')}>Assigned to me</button>
+          <button className={`px-2 py-1 rounded-md border ${filter==='unassigned'?'btn-gradient border-border':'border-border'}`} onClick={()=>setFilter('unassigned')}>Unassigned</button>
+          <button className="ml-auto px-2 py-1 rounded-md border border-border" onClick={()=>load()}>Refresh</button>
+        </div>
       </div>
       {error && <div className="text-danger text-sm" role="alert">{error}</div>}
       <div className="bg-surface rounded-lg border border-border overflow-auto">
@@ -44,6 +58,7 @@ export default function AlertsListPage() {
               <th className="text-left px-3 py-2 border-b border-border">Source</th>
               <th className="text-left px-3 py-2 border-b border-border">Status</th>
               <th className="text-left px-3 py-2 border-b border-border">Severity</th>
+              <th className="text-left px-3 py-2 border-b border-border">Assigned</th>
               <th className="text-left px-3 py-2 border-b border-border">Actions</th>
             </tr>
           </thead>
@@ -55,6 +70,7 @@ export default function AlertsListPage() {
                 <td className="px-3 py-2">{r.source}</td>
                 <td className="px-3 py-2">{r.status}</td>
                 <td className="px-3 py-2">{r.severity}</td>
+                <td className="px-3 py-2">{r.assignedTo ? r.assignedTo : '-'}</td>
                 <td className="px-3 py-2 flex gap-2">
                   <button className="px-2 py-1 border border-border rounded-md btn-gradient" onClick={() => openDetail(r.id)}>View</button>
                   <a className="px-2 py-1 border border-border rounded-md" href={`/alert-workspace?alertId=${r.id}`}>Workspace</a>

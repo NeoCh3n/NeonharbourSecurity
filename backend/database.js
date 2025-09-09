@@ -179,7 +179,10 @@ async function initDatabase() {
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS mitre JSONB",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS assigned_to INTEGER REFERENCES users(id)",
       "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS priority VARCHAR(20)",
-      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS tags TEXT[]"
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS tags TEXT[]",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS disposition VARCHAR(20)",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS escalated BOOLEAN DEFAULT false",
+      "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS escalation_reason TEXT"
     ];
     for (const sql of alterSqls) {
       try { await pool.query(sql); } catch {}
@@ -192,6 +195,7 @@ async function initDatabase() {
     await pool.query('CREATE INDEX IF NOT EXISTS idx_alerts_tenant_status ON alerts (tenant_id, status)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_alerts_tenant_assigned ON alerts (tenant_id, assigned_to)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_alerts_tenant_priority ON alerts (tenant_id, priority)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_alerts_tenant_disposition ON alerts (tenant_id, disposition)');
 
     // Try to enable pgvector if available (optional)
     try {
@@ -579,7 +583,13 @@ async function initDatabase() {
         feedback VARCHAR(100),
         user_id INTEGER REFERENCES users(id),
         tenant_id INTEGER NOT NULL DEFAULT ${tenantDefaultExpr} REFERENCES tenants(id) ON DELETE CASCADE,
-        embedding_vec vector(64)
+        embedding_vec vector(64),
+        assigned_to INTEGER REFERENCES users(id),
+        priority VARCHAR(20),
+        tags TEXT[],
+        disposition VARCHAR(20),
+        escalated BOOLEAN DEFAULT false,
+        escalation_reason TEXT
       `,
       [
         'CREATE INDEX IF NOT EXISTS idx_alerts_fingerprint ON alerts (fingerprint)',

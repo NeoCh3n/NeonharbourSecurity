@@ -228,6 +228,23 @@ function severityOrder(sev) {
   }
 }
 
+function decideAutoTriage(unified, analysis) {
+  const sev = String((analysis?.severity || unified?.severity || 'low')).toLowerCase();
+  const action = String(unified?.action || '').toLowerCase();
+  const category = String(unified?.category || '').toLowerCase();
+  const benignActions = new Set(['login_success', 'email_delivered']);
+  const benignCategories = new Set(['informational', 'info']);
+  // Heuristics for MVP
+  if (sev === 'low' && (benignActions.has(action) || benignCategories.has(category))) {
+    return { disposition: 'false_positive', status: 'closed', priority: 'low', needEscalate: false, reason: 'Benign low-severity pattern' };
+  }
+  if (sev === 'high' || sev === 'critical') {
+    return { disposition: 'true_positive', status: 'needs_review', priority: 'high', needEscalate: true, reason: `Auto escalate ${sev}` };
+  }
+  // Medium or unknown → uncertain
+  return { disposition: 'uncertain', status: 'needs_review', priority: 'medium', needEscalate: false, reason: 'Requires analyst review' };
+}
+
 // Helper to process and persist alert objects
 async function processAlertsForUser(alertObjs, userId, tenantId) {
   const processed = [];
@@ -310,12 +327,36 @@ async function processAlertsForUser(alertObjs, userId, tenantId) {
         ]
       );
       try { await linkAlertToCase(tenantId, caseId, result.rows[0].id); } catch {}
+      // Auto-triage
+      try {
+        const triage = decideAutoTriage(unified, analysis);
+        await pool.query(
+          'UPDATE alerts SET status=$1, priority=$2, disposition=$3, escalated=$4, feedback=COALESCE(feedback,$5) WHERE id=$6 AND tenant_id=$7',
+          [triage.status, triage.priority, triage.disposition, triage.needEscalate, triage.reason, result.rows[0].id, tenantId]
+        );
+        // Create approval request for severe cases (example: disable account or isolate endpoint)
+        if (triage.needEscalate) {
+          const rec = Array.isArray(recommendations) && recommendations.length ? recommendations[0] : null;
+          const suggestedAction = rec?.action || (unified?.principal ? 'disable-account' : (unified?.asset ? 'isolate-endpoint' : 'containment')); 
+          try {
+            await pool.query(
+              `INSERT INTO approval_requests (user_id, alert_id, action, parameters, status, reason, trace_id, tenant_id)
+               VALUES ($1,$2,$3,$4,'pending',$5,$6,$7)`,
+              [userId, result.rows[0].id, suggestedAction, JSON.stringify({ context: { severity: sevFrom(analysis, unified), principal: unified?.principal, asset: unified?.asset } }), 'Auto escalation', Math.random().toString(36).slice(2), tenantId]
+            );
+          } catch {}
+        }
+      } catch {}
       processed.push(result.rows[0]);
     } catch (error) {
       console.error('Error processing alert:', error);
     }
   }
   return processed;
+}
+
+function sevFrom(analysis, unified) {
+  return String(analysis?.severity || unified?.severity || 'low').toLowerCase();
 }
 
 // Alerts upload (CSV/JSON file or JSON body)
@@ -1129,6 +1170,27 @@ app.get('/metrics', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching metrics:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Lightweight counts for sidebar badges
+app.get('/nav/counts', authMiddleware, async (req, res) => {
+  try {
+    const approvals = await pool.query('SELECT COUNT(*)::int AS c FROM approval_requests WHERE tenant_id=$1 AND status=\'pending\'', [req.tenantId]);
+    const cases = await pool.query("SELECT COUNT(*)::int AS c FROM cases WHERE tenant_id=$1 AND COALESCE(status,'open')='open'", [req.tenantId]);
+    const triageTotal = await pool.query("SELECT COUNT(*)::int AS c FROM alerts WHERE tenant_id=$1 AND COALESCE(status,'') NOT IN ('resolved','closed')", [req.tenantId]);
+    const triageUnassigned = await pool.query("SELECT COUNT(*)::int AS c FROM alerts WHERE tenant_id=$1 AND COALESCE(status,'') NOT IN ('resolved','closed') AND assigned_to IS NULL", [req.tenantId]);
+    const triageMine = await pool.query("SELECT COUNT(*)::int AS c FROM alerts WHERE tenant_id=$1 AND COALESCE(status,'') NOT IN ('resolved','closed') AND assigned_to=$2", [req.tenantId, req.user.id]);
+    res.json({
+      approvalsPending: approvals.rows[0]?.c || 0,
+      casesOpen: cases.rows[0]?.c || 0,
+      triageTotal: triageTotal.rows[0]?.c || 0,
+      triageUnassigned: triageUnassigned.rows[0]?.c || 0,
+      triageAssignedToMe: triageMine.rows[0]?.c || 0,
+    });
+  } catch (e) {
+    console.error('Error fetching nav counts:', e);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

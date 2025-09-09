@@ -74,6 +74,16 @@ export const alertsApi = {
   },
 
   list: () => apiRequest('/alerts'),
+  queue: (params: { assigned?: 'me'|'unassigned'; status?: string; severity?: string; limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.assigned) qs.set('assigned', params.assigned);
+    if (params.status) qs.set('status', params.status);
+    if (params.severity) qs.set('severity', params.severity);
+    if (params.limit != null) qs.set('limit', String(params.limit));
+    if (params.offset != null) qs.set('offset', String(params.offset));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return apiRequest(`/alerts/queue${suffix}`);
+  },
 
   get: (id: number) => apiRequest(`/alerts/${id}`),
 

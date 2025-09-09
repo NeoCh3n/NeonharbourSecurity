@@ -16,7 +16,7 @@ export default function App() {
   // Example: redirect unknown root to dashboard
   useEffect(() => {
     if (location.pathname === '/') {
-      navigate('/plan', { replace: true });
+      navigate('/report', { replace: true });
     }
   }, [location.pathname, navigate]);
 

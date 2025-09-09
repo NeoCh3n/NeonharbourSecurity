@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
 import { ChartFrame, ChartSkeleton, downsample } from '../components/charts/ChartFrame';
 import { AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -10,6 +11,7 @@ type TrendPoint = { day: string; alerts: number };
 
 export default function DashboardPage() {
   const setRight = useUI(s => s.setRightPanelOpen);
+  const [rangeDays, setRangeDays] = useState<number>(30);
 
   const metricsQ = useQuery({
     queryKey: ['metrics'],
@@ -23,28 +25,38 @@ export default function DashboardPage() {
 
   const unauthorized = (metricsQ.error as any)?.status === 401 || (alertsQ.error as any)?.status === 401;
 
-  // Build last 30-day trend from alerts
-  const trend: TrendPoint[] = (() => {
+  // Build last N-day trend from alerts
+  const trend: TrendPoint[] = useMemo(() => {
     const arr = alertsQ.data?.alerts || [];
+    const cutoff = Date.now() - rangeDays * 24 * 3600 * 1000;
     const byDay: Record<string, number> = {};
-    arr.forEach((a: any) => {
-      const d = new Date(a.createdAt);
-      const day = new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
-      byDay[day] = (byDay[day] || 0) + 1;
-    });
+    arr
+      .filter((a: any) => new Date(a.createdAt).getTime() >= cutoff)
+      .forEach((a: any) => {
+        const d = new Date(a.createdAt);
+        const day = new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
+        byDay[day] = (byDay[day] || 0) + 1;
+      });
     const days: string[] = [];
     const now = new Date();
-    for (let i = 29; i >= 0; i--) {
+    for (let i = rangeDays - 1; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
       days.push(d.toISOString().slice(0, 10));
     }
     return days.map(day => ({ day, alerts: byDay[day] || 0 }));
-  })();
+  }, [alertsQ.data, rangeDays]);
 
-  const severityRows = (() => {
-    const obj = metricsQ.data?.severityCounts || {};
-    return Object.keys(obj).map(k => ({ name: k, count: obj[k] }));
-  })();
+  const severityRows = useMemo(() => {
+    // Range-limited severity based on alerts list for more immediate feedback
+    const arr = alertsQ.data?.alerts || [];
+    const cutoff = Date.now() - rangeDays * 24 * 3600 * 1000;
+    const by: Record<string, number> = {};
+    arr.filter((a:any)=> new Date(a.createdAt).getTime() >= cutoff).forEach((a:any)=>{
+      const k = a.severity || 'unknown';
+      by[k] = (by[k] || 0) + 1;
+    });
+    return Object.keys(by).map(k => ({ name: k, count: by[k] }));
+  }, [alertsQ.data, rangeDays]);
 
   // Note: status distribution available via metrics if needed for future panels
 
@@ -52,13 +64,14 @@ export default function DashboardPage() {
   const totalInvestigations = metricsQ.data?.totalAlerts ?? 0;
   const resolvedCount = (metricsQ.data?.resolvedCount as number) ?? (metricsQ.data?.statusCounts?.resolved as number) ?? 0;
 
-  // Simple 7-day over previous-7-day delta from trend
+  // Simple N-day over previous-N-day delta from trend
   function pctDeltaFromTrend(points: TrendPoint[]): number {
-    if (!points || points.length < 14) return 0;
-    const last7 = points.slice(-7).reduce((s, p) => s + (p.alerts || 0), 0);
-    const prev7 = points.slice(-14, -7).reduce((s, p) => s + (p.alerts || 0), 0);
-    if (prev7 === 0) return last7 > 0 ? 100 : 0;
-    return ((last7 - prev7) / prev7) * 100;
+    const n = rangeDays;
+    if (!points || points.length < n * 2) return 0;
+    const lastN = points.slice(-n).reduce((s, p) => s + (p.alerts || 0), 0);
+    const prevN = points.slice(-(n * 2), -n).reduce((s, p) => s + (p.alerts || 0), 0);
+    if (prevN === 0) return lastN > 0 ? 100 : 0;
+    return ((lastN - prevN) / prevN) * 100;
   }
   const kpiDelta = pctDeltaFromTrend(trend);
 
@@ -69,15 +82,16 @@ export default function DashboardPage() {
   }
 
   // Alerts by source aggregation for the bottom-right panel
-  const sourceRows = (() => {
+  const sourceRows = useMemo(() => {
     const arr = alertsQ.data?.alerts || [];
+    const cutoff = Date.now() - rangeDays * 24 * 3600 * 1000;
     const by: Record<string, number> = {};
-    arr.forEach((a: any) => {
+    arr.filter((a:any)=> new Date(a.createdAt).getTime() >= cutoff).forEach((a: any) => {
       const key = a.source || 'unknown';
       by[key] = (by[key] || 0) + 1;
     });
     return Object.keys(by).map(k => ({ name: k, count: by[k] }));
-  })();
+  }, [alertsQ.data, rangeDays]);
 
   // Top 10 alerts table data (latest 10)
   type AlertRow = { id: number; createdAt: string; severity: string; source: string; status: string };
@@ -94,10 +108,15 @@ export default function DashboardPage() {
     <div className="space-y-4">
       <section className="bg-surface rounded-lg border border-border p-3 shadow-sm flex items-center gap-2">
         <span className="text-sm text-muted">Global filter:</span>
-        <select aria-label="Time range" className="border border-border rounded-md px-2 py-1 bg-surface text-text">
-          <option>Last 30 days</option>
-          <option>Last 7 days</option>
-          <option>Last 90 days</option>
+        <select
+          aria-label="Time range"
+          className="border border-border rounded-md px-2 py-1 bg-surface text-text"
+          value={rangeDays}
+          onChange={(e) => setRangeDays(parseInt(e.target.value, 10))}
+        >
+          <option value={7}>Last 7 days</option>
+          <option value={30}>Last 30 days</option>
+          <option value={90}>Last 90 days</option>
         </select>
         <button className="ml-auto px-3 py-1.5 border border-border rounded-md" onClick={() => setRight(true)}>Open Intel Panel</button>
       </section>

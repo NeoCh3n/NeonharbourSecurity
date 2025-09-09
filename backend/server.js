@@ -334,6 +334,22 @@ async function processAlertsForUser(alertObjs, userId, tenantId) {
           'UPDATE alerts SET status=$1, priority=$2, disposition=$3, escalated=$4, feedback=COALESCE(feedback,$5) WHERE id=$6 AND tenant_id=$7',
           [triage.status, triage.priority, triage.disposition, triage.needEscalate, triage.reason, result.rows[0].id, tenantId]
         );
+        // Auto-suppress fingerprint for false positives (time-boxed)
+        if (triage.disposition === 'false_positive' && unified?.fingerprint) {
+          const exists = await pool.query(
+            "SELECT 1 FROM suppression_rules WHERE tenant_id=$1 AND scope='alert' AND condition->>'fingerprint' = $2",
+            [tenantId, unified.fingerprint]
+          );
+          if (exists.rows.length === 0) {
+            const cond = { fingerprint: unified.fingerprint };
+            const exp = new Date(Date.now() + 7 * 24 * 3600 * 1000); // 7 days
+            try { await pool.query(
+              `INSERT INTO suppression_rules (tenant_id, scope, condition, expires_at)
+               VALUES ($1,'alert',$2,$3)`,
+              [tenantId, JSON.stringify(cond), exp]
+            ); } catch {}
+          }
+        }
         // Create approval request for severe cases (example: disable account or isolate endpoint)
         if (triage.needEscalate) {
           const rec = Array.isArray(recommendations) && recommendations.length ? recommendations[0] : null;

@@ -197,7 +197,7 @@ async function processAlertsForUser(alertObjs, userId) {
            tactic,
            principal, asset, entities, fingerprint, case_id, plan, recommendations,
            ack_time, investigate_start, resolve_time,
-           embedding, embedding_text, embedding_vec,
+           embedding, embedding_text,
            mitre, timeline, evidence, analysis_time, raw, user_id
          ) VALUES (
            $1,$2,$3,$4,$5,$6,$7,$8,
@@ -205,8 +205,7 @@ async function processAlertsForUser(alertObjs, userId) {
            $10,$11,$12,$13,$14,$15,$16,
            $17,$18,$19,
            $20,$21,
-           $22,$23,$24,
-           $25,$26,$27,$28,$29
+           $22,$23,$24,$25,$26,$27
          ) RETURNING id, created_at, source, status, summary, severity`,
         [
           unified.source || 'ingest',
@@ -230,7 +229,6 @@ async function processAlertsForUser(alertObjs, userId) {
           null,
           unified.embedding ? JSON.stringify(unified.embedding) : null,
           unified.embeddingText || null,
-          Array.isArray(unified.embedding?.vec) ? `[${unified.embedding.vec.join(',')}]` : null,
           mitre ? JSON.stringify(mitre) : null,
           timelineJson,
           evidenceJson,

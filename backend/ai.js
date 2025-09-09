@@ -3,35 +3,54 @@ const { withRetry, classifyError, parallelMap } = require('./utils/execution');
 
 const { getLLMConfig } = require('./config/llm');
 
-async function callModel(messages) {
+async function callModel(messages, opts = {}) {
   const cfg = await getLLMConfig();
-  const baseUrl = cfg.baseUrl;
+  let baseUrl = cfg.baseUrl;
   const model = cfg.model;
+  const maxTokens = typeof opts.maxTokens === 'number' ? Math.max(64, Math.min(4000, opts.maxTokens)) : 1000;
+  const timeoutMs = typeof opts.timeoutMs === 'number' ? Math.max(2000, Math.min(60000, opts.timeoutMs)) : 30000;
 
   try {
     const headers = cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {};
-    const doCall = async () => {
+    const postChat = async (base) => {
       const resp = await axios.post(
-        `${baseUrl}/chat/completions`,
-        {
-          model,
-          messages,
-          temperature: 0.1,
-          max_tokens: 1000,
-        },
-        {
-          headers,
-          timeout: 30000,
-        }
+        `${base}/chat/completions`,
+        { model, messages, temperature: 0.1, max_tokens: maxTokens },
+        { headers, timeout: timeoutMs }
       );
       return resp.data.choices[0].message.content.trim();
     };
-    return await withRetry(doCall, {
-      retries: 3,
-      base: 400,
-      factor: 2,
-      shouldRetry: (err, info) => ['timeout', 'network', 'rate_limit', 'server_error'].includes(info.class),
-    });
+
+    // Primary attempt with configured base
+    try {
+      return await withRetry(() => postChat(baseUrl), {
+        retries: (opts.retries ?? 3),
+        base: 400,
+        factor: 2,
+        shouldRetry: (err, info) => ['timeout', 'network', 'rate_limit', 'server_error'].includes(info.class),
+      });
+    } catch (primaryErr) {
+      // If local provider inside Docker is pointing at 127.0.0.1, try host.docker.internal as fallback
+      const pInfo = classifyError(primaryErr);
+      const isLocal = (cfg.provider === 'local');
+      const needsDockerFallback = isLocal && (/(^http:\/\/|^https:\/\/)(localhost|127\.0\.0\.1)/i.test(baseUrl));
+      if (needsDockerFallback && ['timeout', 'network', 'server_error'].includes(pInfo.class)) {
+        const altBase = baseUrl.replace(/:\/\/(localhost|127\.0\.0\.1)/i, '://host.docker.internal');
+        if (altBase !== baseUrl) {
+          try {
+            return await withRetry(() => postChat(altBase), {
+              retries: 2,
+              base: 400,
+              factor: 2,
+              shouldRetry: (err, info) => ['timeout', 'network', 'rate_limit', 'server_error'].includes(info.class),
+            });
+          } catch (altErr) {
+            throw altErr;
+          }
+        }
+      }
+      throw primaryErr;
+    }
   } catch (err) {
     const info = classifyError(err);
     console.error(`DeepSeek API call failed [${info.class}]:`, err.message);
@@ -173,15 +192,15 @@ async function hunterQuery(question, logs = []) {
   
   try {
     const aiResp = await callModel([
-      { 
-        role: 'system', 
-        content: 'You are a SOC threat hunter. Analyze security questions using provided logs. Respond with valid JSON containing: answer (string), evidence (array of relevant log snippets or findings). Ensure valid JSON format.' 
+      {
+        role: 'system',
+        content: 'You are a SOC threat hunter. Answer the investigation question using ONLY the provided logs/context. Return ONLY strict JSON of the form {"answer":"...","evidence":["..."]}. Rules: 1) No prose, no backticks, no extra fields. 2) Do not restate the question. 3) Be concise (<=2 sentences). 4) If insufficient information, set answer to "Insufficient evidence." and evidence to [].'
       },
-      { 
-        role: 'user', 
-        content: `Question: ${question}\n\nRelevant logs:\n${logText.slice(0, 4000)}` // Limit log size
+      {
+        role: 'user',
+        content: `Question: ${question}\n\nContext logs (may be empty):\n${logText.slice(0, 4000)}`
       }
-    ]);
+    ], { timeoutMs: 8000, maxTokens: 300, retries: 1 });
 
     if (aiResp) {
       try {
@@ -197,7 +216,14 @@ async function hunterQuery(question, logs = []) {
       } catch (e) {
         console.warn('Failed to parse threat hunter response as JSON:', e.message);
       }
-      return { answer: aiResp, evidence: logs.slice(0, 3) };
+      // Fallback: sanitize raw text to a concise answer
+      let text = String(aiResp || '');
+      try { text = text.replace(/```[\s\S]*?```/g, ' '); } catch {}
+      text = text.replace(/\s+/g, ' ').trim();
+      if (/^question\s*:/i.test(text)) text = text.replace(/^question\s*:/i, '').trim();
+      const firstSentence = (text.match(/(.+?[.!?])\s+/) || [null, text])[1].trim();
+      const answer = (firstSentence || text).slice(0, 280) || 'Insufficient evidence.';
+      return { answer, evidence: logs.slice(0, 3) };
     }
   } catch (error) {
     console.error('Threat hunter query failed:', error.message);

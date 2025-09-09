@@ -47,45 +47,39 @@ export default function InvestigatePage({ alertIdOverride }: { alertIdOverride?:
   async function digDeeper() {
     if (digging) return;
     setDigging(true);
-    // Try AI to suggest a non-duplicate next question based on context; fallback to a rotating pool
+    // Immediate UX: choose a new question locally and render the card instantly, then fetch the answer.
     const logs: string[] = [];
     if (inv?.summary) logs.push(`SUMMARY: ${inv.summary}`);
     if (timeline.length) logs.push(`TIMELINE:\n${timeline.slice(0, 6).map(t => `${t.ts} ${t.text}`).join('\n')}`);
 
     const asked = new Set(qna.map(x => x.q));
-    let nextQ = '';
-    try {
-      const prompt = `Given the context, propose a new, non-repeating next investigation question. Output only the question. Already asked: ${Array.from(asked).join(' | ')}`;
-      const resp = await hunterApi.query(prompt, logs);
-      nextQ = (resp?.answer || '').trim();
-    } catch {}
+    const pool = [
+      'Any suspicious outbound to unusual geo or risky IPs?',
+      'Does the host show anomalous processes or parent-child chains?',
+      'Any multi-geo logins or repeated failures for the account?',
+      'Any persistence indicators (scheduled tasks/registry/services)?',
+      'Any bulk data exfiltration or abnormal volume spikes?',
+      'Any newly created privileged accounts or group changes?',
+      'Any similar historical cases in EDR/SIEM for this fingerprint?'
+    ];
+    const candidate = pool.find(q => !asked.has(q));
+    const nextQ = candidate || `${pool[0]} (${qna.length + 1})`;
 
-    if (!nextQ || asked.has(nextQ)) {
-      const pool = [
-        'Any suspicious outbound to unusual geo or risky IPs?',
-        'Does the host show anomalous processes or parent-child chains?',
-        'Any multi-geo logins or repeated failures for the account?',
-        'Any persistence indicators (scheduled tasks/registry/services)?',
-        'Any bulk data exfiltration or abnormal volume spikes?',
-        'Any newly created privileged accounts or group changes?',
-        'Any similar historical cases in EDR/SIEM for this fingerprint?'
-      ];
-      const candidate = pool.find(q => !asked.has(q));
-      nextQ = candidate || `${pool[0]} (${qna.length + 1})`;
-    }
+    // Add the card immediately with a placeholder answer
+    const index = qna.length;
+    setQna(prev => ([...prev, { q: nextQ, a: 'Thinking…', evidence: undefined }]));
 
-    let answer = '';
-    let evidence: any = undefined;
+    // Fetch the answer asynchronously
     try {
       const res = await hunterApi.query(nextQ, logs);
-      answer = (res?.answer || '').trim();
-      if (Array.isArray(res?.evidence) && res.evidence[0]) {
-        evidence = { type: 'log', content: res.evidence[0] };
-      }
-    } catch {}
-
-    setQna(prev => ([...prev, { q: nextQ, a: answer, evidence }]));
-    setDigging(false);
+      const answer = (res?.answer || '').trim();
+      const evidence = Array.isArray(res?.evidence) && res.evidence[0] ? { type: 'log', content: res.evidence[0] } : undefined;
+      setQna(prev => prev.map((item, i) => i === index ? { ...item, a: answer || 'No answer', evidence } : item));
+    } catch (e) {
+      setQna(prev => prev.map((item, i) => i === index ? { ...item, a: 'Unable to fetch answer right now.' } : item));
+    } finally {
+      setDigging(false);
+    }
   }
 
   return (

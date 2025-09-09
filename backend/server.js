@@ -83,6 +83,33 @@ async function authMiddleware(req, res, next) {
     const result = await pool.query('SELECT id, email, is_admin FROM users WHERE id = $1', [payload.id]);
     if (result.rows.length === 0) return res.status(401).json({ error: 'Invalid token' });
     req.user = result.rows[0];
+    // Resolve tenant for this user (per-request scoping for team views)
+    try {
+      const override = req.headers['x-tenant-id'] || req.headers['x-tenant'];
+      let desiredTenantId = override ? parseInt(String(override), 10) : null;
+      let tenantRow;
+      if (desiredTenantId && !Number.isNaN(desiredTenantId)) {
+        const check = await pool.query('SELECT tenant_id, role FROM user_tenants WHERE user_id=$1 AND tenant_id=$2', [req.user.id, desiredTenantId]);
+        if (check.rows.length) tenantRow = { id: check.rows[0].tenant_id, role: check.rows[0].role };
+      }
+      if (!tenantRow) {
+        const map = await pool.query(
+          "SELECT ut.tenant_id, ut.role FROM user_tenants ut JOIN tenants t ON t.id = ut.tenant_id WHERE ut.user_id=$1 ORDER BY CASE WHEN ut.role='admin' THEN 0 ELSE 1 END, t.id ASC",
+          [req.user.id]
+        );
+        if (map.rows.length) tenantRow = { id: map.rows[0].tenant_id, role: map.rows[0].role };
+      }
+      if (!tenantRow) {
+        const def = await pool.query("SELECT id FROM tenants WHERE slug='default' ORDER BY id ASC LIMIT 1");
+        if (def.rows.length) tenantRow = { id: def.rows[0].id, role: 'member' };
+      }
+      req.tenantId = tenantRow?.id || null;
+      req.tenantRole = tenantRow?.role || null;
+    } catch (e) {
+      console.warn('Tenant resolution error:', e.message);
+      req.tenantId = null;
+      req.tenantRole = null;
+    }
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid token' });
@@ -114,6 +141,13 @@ app.post('/auth/register', async (req, res) => {
       [email, hashed, isAdmin]
     );
     const user = result.rows[0];
+    // Map user to default tenant
+    try {
+      const def = await pool.query("SELECT id FROM tenants WHERE slug='default' ORDER BY id ASC LIMIT 1");
+      if (def.rows.length) {
+        await pool.query('INSERT INTO user_tenants (user_id, tenant_id, role) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [user.id, def.rows[0].id, isAdmin ? 'admin' : 'member']);
+      }
+    } catch {}
     const token = generateToken(user);
     res.json({ token, isAdmin: user.is_admin });
   } catch (error) {
@@ -158,7 +192,7 @@ const { getTool } = require('./tools');
 const { auditLog } = require('./middleware/audit');
 
 // Helper to process and persist alert objects
-async function processAlertsForUser(alertObjs, userId) {
+async function processAlertsForUser(alertObjs, userId, tenantId) {
   const processed = [];
   for (const alert of alertObjs) {
     try {
@@ -172,14 +206,14 @@ async function processAlertsForUser(alertObjs, userId) {
       // Link to case by fingerprint
       let caseId;
       try {
-        const sim = await findSimilarCaseCandidate(unified.embedding?.vec, userId);
+        const sim = await findSimilarCaseCandidate(unified.embedding?.vec, tenantId);
         if (sim?.caseId) caseId = sim.caseId;
       } catch {}
       if (!caseId) {
-        caseId = await upsertCaseForFingerprint(unified.fingerprint, unified.severity || 'low');
+        caseId = await upsertCaseForFingerprint(tenantId, unified.fingerprint, unified.severity || 'low');
       }
       // Long-horizon: reuse or create case plan with memory context
-      const { plan } = await getOrInitCasePlan(caseId, userId, { generatePlanFn: generatePlan, unified, analysis });
+      const { plan } = await getOrInitCasePlan(caseId, tenantId, userId, { generatePlanFn: generatePlan, unified, analysis });
       // MITRE ATT&CK mapping via AI
       let mitre = null; let tactic = null; let techniqueStr = unified.technique || null;
       try {
@@ -198,14 +232,14 @@ async function processAlertsForUser(alertObjs, userId) {
            principal, asset, entities, fingerprint, case_id, plan, recommendations,
            ack_time, investigate_start, resolve_time,
            embedding, embedding_text,
-           mitre, timeline, evidence, analysis_time, raw, user_id
+           mitre, timeline, evidence, analysis_time, raw, user_id, tenant_id
          ) VALUES (
            $1,$2,$3,$4,$5,$6,$7,$8,
            $9,
            $10,$11,$12,$13,$14,$15,$16,
            $17,$18,$19,
            $20,$21,
-           $22,$23,$24,$25,$26,$27
+           $22,$23,$24,$25,$26,$27,$28
          ) RETURNING id, created_at, source, status, summary, severity`,
         [
           unified.source || 'ingest',
@@ -234,10 +268,11 @@ async function processAlertsForUser(alertObjs, userId) {
           evidenceJson,
           analysis.analysisTime,
           rawJson,
-          userId
+          userId,
+          tenantId
         ]
       );
-      try { await linkAlertToCase(caseId, result.rows[0].id); } catch {}
+      try { await linkAlertToCase(tenantId, caseId, result.rows[0].id); } catch {}
       processed.push(result.rows[0]);
     } catch (error) {
       console.error('Error processing alert:', error);
@@ -268,7 +303,7 @@ app.post('/alerts/upload', authMiddleware, upload.single('file'), async (req, re
     return res.status(400).json({ error: 'Invalid data' });
   }
 
-  const processed = await processAlertsForUser(data, req.user.id);
+  const processed = await processAlertsForUser(data, req.user.id, req.tenantId);
   res.json({ alerts: processed });
 });
 
@@ -287,15 +322,15 @@ app.post('/alerts/ingest', authMiddleware, async (req, res) => {
     return res.status(400).json({ error: 'Invalid data' });
   }
   if (!data.length) return res.status(400).json({ error: 'No alerts provided' });
-  const processed = await processAlertsForUser(data, req.user.id);
+  const processed = await processAlertsForUser(data, req.user.id, req.tenantId);
   res.json({ alerts: processed });
 });
 
 app.get('/alerts', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, created_at as "createdAt", source, status, severity FROM alerts WHERE user_id = $1 ORDER BY created_at DESC',
-      [req.user.id]
+      'SELECT id, created_at as "createdAt", source, status, severity FROM alerts WHERE tenant_id = $1 ORDER BY created_at DESC',
+      [req.tenantId]
     );
     res.json({ alerts: result.rows });
   } catch (error) {
@@ -308,8 +343,8 @@ app.get('/alerts/:id', authMiddleware, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const result = await pool.query(
-      'SELECT * FROM alerts WHERE id = $1 AND user_id = $2',
-      [id, req.user.id]
+      'SELECT * FROM alerts WHERE id = $1 AND tenant_id = $2',
+      [id, req.tenantId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const row = result.rows[0];
@@ -339,7 +374,7 @@ app.get('/alerts/:id', authMiddleware, async (req, res) => {
           if (mitre && Array.isArray(mitre.tactics) && mitre.tactics[0]) tactic = tactic || mitre.tactics[0].id || mitre.tactics[0].name || null;
         } catch {}
         // Persist if anything computed
-        await pool.query('UPDATE alerts SET recommendations=$1, mitre=$2, tactic=$3, technique=$4 WHERE id=$5 AND user_id=$6', [JSON.stringify(recs||[]), mitre ? JSON.stringify(mitre) : row.mitre || null, tactic, technique, id, req.user.id]);
+        await pool.query('UPDATE alerts SET recommendations=$1, mitre=$2, tactic=$3, technique=$4 WHERE id=$5 AND tenant_id=$6', [JSON.stringify(recs||[]), mitre ? JSON.stringify(mitre) : row.mitre || null, tactic, technique, id, req.tenantId]);
         row.recommendations = recs || row.recommendations;
         row.mitre = mitre || row.mitre;
         row.tactic = tactic || row.tactic;
@@ -360,8 +395,8 @@ app.get('/alerts/:id/investigation', authMiddleware, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const result = await pool.query(
-      'SELECT summary, timeline, evidence FROM alerts WHERE id = $1 AND user_id = $2',
-      [id, req.user.id]
+      'SELECT summary, timeline, evidence FROM alerts WHERE id = $1 AND tenant_id = $2',
+      [id, req.tenantId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const row = result.rows[0];
@@ -378,7 +413,7 @@ app.get('/alerts/:id/investigation', authMiddleware, async (req, res) => {
 app.get('/alerts/:id/plan', authMiddleware, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
-    const r = await pool.query('SELECT plan, recommendations, ack_time, investigate_start, resolve_time, raw, summary, timeline, evidence, case_id FROM alerts WHERE id=$1 AND user_id=$2', [id, req.user.id]);
+    const r = await pool.query('SELECT plan, recommendations, ack_time, investigate_start, resolve_time, raw, summary, timeline, evidence, case_id FROM alerts WHERE id=$1 AND tenant_id=$2', [id, req.tenantId]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const row = r.rows[0];
     row.plan = parseJsonMaybe(row.plan, {});
@@ -387,7 +422,7 @@ app.get('/alerts/:id/plan', authMiddleware, async (req, res) => {
     // Prefer case plan if available
     if (row.case_id) {
       try {
-        const cp = await getCasePlan(row.case_id);
+        const cp = await getCasePlan(row.case_id, req.tenantId);
         if (cp?.plan) row.plan = cp.plan;
       } catch {}
     }
@@ -400,12 +435,12 @@ app.get('/alerts/:id/plan', authMiddleware, async (req, res) => {
         const analysis = { summary: row.summary, timeline: parseJsonMaybe(row.timeline, []), evidence: parseJsonMaybe(row.evidence, []) };
         let plan;
         if (row.case_id) {
-          const res = await getOrInitCasePlan(row.case_id, req.user.id, { generatePlanFn: generatePlan, unified, analysis });
+          const res = await getOrInitCasePlan(row.case_id, req.tenantId, req.user.id, { generatePlanFn: generatePlan, unified, analysis });
           plan = res.plan;
         } else {
           plan = await generatePlan(unified, analysis);
         }
-        await pool.query('UPDATE alerts SET plan=$1 WHERE id=$2 AND user_id=$3', [JSON.stringify(plan), id, req.user.id]);
+        await pool.query('UPDATE alerts SET plan=$1 WHERE id=$2 AND tenant_id=$3', [JSON.stringify(plan), id, req.tenantId]);
         row.plan = plan;
       } catch {}
     }
@@ -420,7 +455,7 @@ app.get('/alerts/:id/plan', authMiddleware, async (req, res) => {
 app.post('/alerts/:id/plan', authMiddleware, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
-    const r = await pool.query('SELECT plan, ack_time, investigate_start, resolve_time, case_id FROM alerts WHERE id=$1 AND user_id=$2', [id, req.user.id]);
+    const r = await pool.query('SELECT plan, ack_time, investigate_start, resolve_time, case_id FROM alerts WHERE id=$1 AND tenant_id=$2', [id, req.tenantId]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     let plan = parseJsonMaybe(r.rows[0].plan, {});
     const { stepId, done, plan: newPlan } = req.body || {};
@@ -440,13 +475,13 @@ app.post('/alerts/:id/plan', authMiddleware, async (req, res) => {
       }
     }
     const upd = await pool.query(
-      'UPDATE alerts SET plan=$1, ack_time=$2, investigate_start=$3, resolve_time=$4 WHERE id=$5 AND user_id=$6 RETURNING plan, ack_time, investigate_start, resolve_time',
-      [JSON.stringify(plan || {}), ack, inv, reso, id, req.user.id]
+      'UPDATE alerts SET plan=$1, ack_time=$2, investigate_start=$3, resolve_time=$4 WHERE id=$5 AND tenant_id=$6 RETURNING plan, ack_time, investigate_start, resolve_time',
+      [JSON.stringify(plan || {}), ack, inv, reso, id, req.tenantId]
     );
     // Keep case plan in sync if present
     const caseId = r.rows[0].case_id;
     if (caseId) {
-      try { await updateCasePlan(caseId, plan); } catch {}
+      try { await updateCasePlan(caseId, req.tenantId, plan); } catch {}
     }
     const row = upd.rows[0];
     row.plan = parseJsonMaybe(row.plan, {});
@@ -476,7 +511,7 @@ app.get('/integrations', authMiddleware, async (req, res) => {
 app.get('/cases/:id/memory', authMiddleware, async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   try {
-    const mem = await listCaseMemory(caseId, req.user.id, { limit: 200 });
+    const mem = await listCaseMemory(caseId, req.tenantId, { limit: 200 });
     res.json({ memory: mem });
   } catch (e) {
     console.error('Error listing memory:', e);
@@ -488,7 +523,7 @@ app.post('/cases/:id/memory', authMiddleware, async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   const { type = 'note', key = null, value = {}, tags = [], importance = 0.5, sessionId = null } = req.body || {};
   try {
-    const row = await addMemory({ userId: req.user.id, caseId, sessionId, type, key, value, tags, importance });
+    const row = await addMemory({ tenantId: req.tenantId, userId: req.user.id, caseId, sessionId, type, key, value, tags, importance });
     res.json({ success: true, memory: row });
   } catch (e) {
     console.error('Error adding memory:', e);
@@ -500,7 +535,7 @@ app.post('/cases/:id/memory', authMiddleware, async (req, res) => {
 app.get('/cases/:id/sessions', authMiddleware, async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   try {
-    const rows = await listSessions(caseId, req.user.id);
+    const rows = await listSessions(caseId, req.tenantId);
     res.json({ sessions: rows });
   } catch (e) {
     console.error('Error listing sessions:', e);
@@ -512,7 +547,7 @@ app.post('/cases/:id/sessions', authMiddleware, async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   const { alertId = null, title = null, context = {} } = req.body || {};
   try {
-    const row = await createSession({ userId: req.user.id, caseId, alertId, title, context });
+    const row = await createSession({ tenantId: req.tenantId, userId: req.user.id, caseId, alertId, title, context });
     res.json({ success: true, session: row });
   } catch (e) {
     console.error('Error creating session:', e);
@@ -523,7 +558,7 @@ app.post('/cases/:id/sessions', authMiddleware, async (req, res) => {
 app.get('/sessions/:sessionId', authMiddleware, async (req, res) => {
   const sessionId = parseInt(req.params.sessionId, 10);
   try {
-    const row = await getSession(sessionId, req.user.id);
+    const row = await getSession(sessionId, req.tenantId);
     if (!row) return res.status(404).json({ error: 'Not found' });
     res.json(row);
   } catch (e) {
@@ -536,7 +571,7 @@ app.get('/sessions/:sessionId', authMiddleware, async (req, res) => {
 app.get('/cases/:id/plan', authMiddleware, async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   try {
-    const row = await getCasePlan(caseId);
+    const row = await getCasePlan(caseId, req.tenantId);
     if (!row) return res.status(404).json({ error: 'Not found' });
     res.json(row);
   } catch (e) {
@@ -550,7 +585,7 @@ app.post('/cases/:id/plan', authMiddleware, async (req, res) => {
   const { plan } = req.body || {};
   if (!plan) return res.status(400).json({ error: 'Missing plan' });
   try {
-    const row = await updateCasePlan(caseId, plan);
+    const row = await updateCasePlan(caseId, req.tenantId, plan);
     res.json({ success: true, plan: row.plan, updatedAt: row.updated_at });
   } catch (e) {
     console.error('Error updating case plan:', e);
@@ -562,7 +597,7 @@ app.post('/cases/:id/plan', authMiddleware, async (req, res) => {
 app.post('/cases/:id/summarize', authMiddleware, async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   try {
-    const result = await summarizeCaseMemory(caseId, req.user.id);
+    const result = await summarizeCaseMemory(caseId, req.tenantId);
     res.json({ success: true, ...result });
   } catch (e) {
     console.error('Error summarizing case:', e);
@@ -572,7 +607,7 @@ app.post('/cases/:id/summarize', authMiddleware, async (req, res) => {
 
 app.post('/jobs/summarize-cases', authMiddleware, async (req, res) => {
   try {
-    const results = await summarizeAllCasesForUser(req.user.id);
+    const results = await summarizeAllCasesForUser(req.tenantId);
     res.json({ success: true, results });
   } catch (e) {
     console.error('Error running summarize job:', e);
@@ -602,7 +637,7 @@ app.post('/admin/settings/llm', authMiddleware, requireAdmin, async (req, res) =
   if (!['deepseek', 'local'].includes(p)) return res.status(400).json({ error: 'Invalid provider' });
   try {
     await setSetting('llm_provider', { provider: p });
-    await auditLog('admin_llm_provider_update', req.user.id, { provider: p, ipAddress: req.ip });
+    await auditLog('admin_llm_provider_update', req.user.id, { provider: p, ipAddress: req.ip }, req.tenantId);
     res.json({ success: true, provider: p });
   } catch (e) {
     console.error('Error updating LLM setting:', e);
@@ -626,7 +661,7 @@ app.post('/admin/settings/register', authMiddleware, requireAdmin, async (req, r
   const val = !!allowSelfRegister;
   try {
     await setSetting('allowSelfRegister', { allowSelfRegister: val });
-    await auditLog('admin_register_toggle', req.user.id, { allowSelfRegister: val, ipAddress: req.ip });
+    await auditLog('admin_register_toggle', req.user.id, { allowSelfRegister: val, ipAddress: req.ip }, req.tenantId);
     res.json({ success: true, allowSelfRegister: val });
   } catch (e) {
     console.error('Error updating register setting:', e);
@@ -657,8 +692,8 @@ app.post('/integrations', authMiddleware, async (req, res) => {
       }
       try {
         await pool.query(
-          'INSERT INTO audit_logs (action, user_id, details, ip_address) VALUES ($1, $2, $3, $4)',
-          ['integrations_update', req.user.id, { provider, enabled }, req.ip]
+          'INSERT INTO audit_logs (action, user_id, details, ip_address, tenant_id) VALUES ($1, $2, $3, $4, $5)',
+          ['integrations_update', req.user.id, { provider, enabled }, req.ip, req.tenantId]
         );
       } catch {}
     }
@@ -678,24 +713,24 @@ app.post('/actions/:id/request', authMiddleware, async (req, res) => {
     const decision = await evaluateAction(req.user.id, action, resource, params?.context || {});
     const traceId = Math.random().toString(36).slice(2);
     if (decision.decision === 'deny') {
-      await auditLog('action_denied', req.user.id, { alertId, action, resource, reason: decision.reason, policyId: decision.policyId, ipAddress: req.ip });
+      await auditLog('action_denied', req.user.id, { alertId, action, resource, reason: decision.reason, policyId: decision.policyId, ipAddress: req.ip }, req.tenantId);
       return res.status(403).json({ error: 'Denied by policy', reason: decision.reason, policyId: decision.policyId });
     }
     if (decision.decision === 'allow') {
       // Execute immediately
       const tool = getTool(action);
       if (!tool) return res.status(400).json({ error: 'Unsupported action' });
-      const result = await toolExecutor(action, () => tool(params));
-      await auditLog('action_execute', req.user.id, { alertId, action, resource, result, ipAddress: req.ip });
+      const result = await toolExecutor(action, () => tool(params), { tenantId: req.tenantId });
+      await auditLog('action_execute', req.user.id, { alertId, action, resource, result, ipAddress: req.ip }, req.tenantId);
       return res.json({ success: true, executed: true, result, traceId });
     }
     // require_approval path: create approval request
     const r = await pool.query(
-      `INSERT INTO approval_requests (user_id, alert_id, action, parameters, status, reason, trace_id)
-       VALUES ($1,$2,$3,$4,'pending',$5,$6) RETURNING id, status`,
-      [req.user.id, alertId, action, JSON.stringify(params || {}), reason || null, traceId]
+      `INSERT INTO approval_requests (user_id, alert_id, action, parameters, status, reason, trace_id, tenant_id)
+       VALUES ($1,$2,$3,$4,'pending',$5,$6,$7) RETURNING id, status`,
+      [req.user.id, alertId, action, JSON.stringify(params || {}), reason || null, traceId, req.tenantId]
     );
-    await auditLog('action_request', req.user.id, { alertId, action, resource, reason, policyId: decision.policyId, ipAddress: req.ip });
+    await auditLog('action_request', req.user.id, { alertId, action, resource, reason, policyId: decision.policyId, ipAddress: req.ip }, req.tenantId);
     res.json({ success: true, executed: false, approvalRequestId: r.rows[0].id, status: r.rows[0].status, traceId });
   } catch (error) {
     console.error('Error creating action request:', error);
@@ -711,7 +746,7 @@ app.post('/actions/:id/execute', authMiddleware, async (req, res) => {
   try {
     const decision = await evaluateAction(req.user.id, action, resource, params?.context || {});
     if (decision.decision === 'deny') {
-      await auditLog('action_denied', req.user.id, { alertId, action, resource, reason: decision.reason, policyId: decision.policyId, ipAddress: req.ip });
+      await auditLog('action_denied', req.user.id, { alertId, action, resource, reason: decision.reason, policyId: decision.policyId, ipAddress: req.ip }, req.tenantId);
       return res.status(403).json({ error: 'Denied by policy', reason: decision.reason, policyId: decision.policyId });
     }
     if (decision.decision === 'require_approval') {
@@ -722,8 +757,8 @@ app.post('/actions/:id/execute', authMiddleware, async (req, res) => {
     }
     const tool = getTool(action);
     if (!tool) return res.status(400).json({ error: 'Unsupported action' });
-    const result = await toolExecutor(action, () => tool(params), { approvalRequestId });
-    await auditLog('action_execute', req.user.id, { alertId, action, resource, approvalRequestId, result, ipAddress: req.ip });
+    const result = await toolExecutor(action, () => tool(params), { approvalRequestId, tenantId: req.tenantId });
+    await auditLog('action_execute', req.user.id, { alertId, action, resource, approvalRequestId, result, ipAddress: req.ip }, req.tenantId);
     res.json({ success: true, result });
   } catch (error) {
     console.error('Error executing action:', error);
@@ -734,8 +769,8 @@ app.post('/actions/:id/execute', authMiddleware, async (req, res) => {
 // Approvals list for current user (their requests) and inbox (all pending - simple MVP)
 app.get('/approvals', authMiddleware, async (req, res) => {
   try {
-    const mine = await pool.query('SELECT * FROM approval_requests WHERE user_id=$1 ORDER BY requested_at DESC', [req.user.id]);
-    const pending = await pool.query('SELECT * FROM approval_requests WHERE status = \'pending\' ORDER BY requested_at DESC');
+    const mine = await pool.query('SELECT * FROM approval_requests WHERE tenant_id=$1 AND user_id=$2 ORDER BY requested_at DESC', [req.tenantId, req.user.id]);
+    const pending = await pool.query('SELECT * FROM approval_requests WHERE tenant_id=$1 AND status = \'pending\' ORDER BY requested_at DESC', [req.tenantId]);
     res.json({ mine: mine.rows, inbox: pending.rows });
   } catch (e) {
     console.error('Error fetching approvals:', e);
@@ -746,7 +781,7 @@ app.get('/approvals', authMiddleware, async (req, res) => {
 app.get('/approvals/:approvalId', authMiddleware, async (req, res) => {
   const approvalId = parseInt(req.params.approvalId, 10);
   try {
-    const r = await pool.query('SELECT * FROM approval_requests WHERE id=$1', [approvalId]);
+    const r = await pool.query('SELECT * FROM approval_requests WHERE id=$1 AND tenant_id=$2', [approvalId, req.tenantId]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json(r.rows[0]);
   } catch (e) {
@@ -758,14 +793,14 @@ app.get('/approvals/:approvalId', authMiddleware, async (req, res) => {
 app.post('/approvals/:approvalId/approve', authMiddleware, async (req, res) => {
   const approvalId = parseInt(req.params.approvalId, 10);
   try {
-    const r = await pool.query('SELECT * FROM approval_requests WHERE id=$1', [approvalId]);
+    const r = await pool.query('SELECT * FROM approval_requests WHERE id=$1 AND tenant_id=$2', [approvalId, req.tenantId]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const reqRow = r.rows[0];
     if (reqRow.status !== 'pending') return res.status(400).json({ error: 'Request not pending' });
     const sod = checkSegregationOfDuties(reqRow.user_id, req.user.id);
     if (!sod.ok) return res.status(403).json({ error: sod.reason });
     const upd = await pool.query('UPDATE approval_requests SET status=\'approved\', approver_id=$1, decided_at=NOW() WHERE id=$2 RETURNING *', [req.user.id, approvalId]);
-    await auditLog('action_approve', req.user.id, { approvalRequestId: approvalId, ipAddress: req.ip });
+    await auditLog('action_approve', req.user.id, { approvalRequestId: approvalId, ipAddress: req.ip }, req.tenantId);
     res.json({ success: true, approval: upd.rows[0] });
   } catch (e) {
     console.error('Error approving request:', e);
@@ -777,11 +812,11 @@ app.post('/approvals/:approvalId/deny', authMiddleware, async (req, res) => {
   const approvalId = parseInt(req.params.approvalId, 10);
   const { reason } = req.body || {};
   try {
-    const r = await pool.query('SELECT * FROM approval_requests WHERE id=$1', [approvalId]);
+    const r = await pool.query('SELECT * FROM approval_requests WHERE id=$1 AND tenant_id=$2', [approvalId, req.tenantId]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     if (r.rows[0].status !== 'pending') return res.status(400).json({ error: 'Request not pending' });
     const upd = await pool.query('UPDATE approval_requests SET status=\'denied\', approver_id=$1, decided_at=NOW(), reason=$2 WHERE id=$3 RETURNING *', [req.user.id, reason || null, approvalId]);
-    await auditLog('action_deny', req.user.id, { approvalRequestId: approvalId, ipAddress: req.ip, reason });
+    await auditLog('action_deny', req.user.id, { approvalRequestId: approvalId, ipAddress: req.ip, reason }, req.tenantId);
     res.json({ success: true, approval: upd.rows[0] });
   } catch (e) {
     console.error('Error denying request:', e);
@@ -812,7 +847,7 @@ app.post('/policies', authMiddleware, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
       [req.user.id, name, description || null, eff, action_pattern, resource_pattern || '*', conds, risk]
     );
-    await auditLog('policy_create', req.user.id, { policyId: r.rows[0].id, ipAddress: req.ip });
+    await auditLog('policy_create', req.user.id, { policyId: r.rows[0].id, ipAddress: req.ip }, req.tenantId);
     res.json({ success: true, policy: r.rows[0] });
   } catch (e) {
     console.error('Error creating policy:', e);
@@ -840,7 +875,7 @@ app.put('/policies/:id', authMiddleware, async (req, res) => {
       [name || null, description || null, eff, action_pattern || null, resource_pattern || null, conds || null, risk || null, id, req.user.id]
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
-    await auditLog('policy_update', req.user.id, { policyId: id, ipAddress: req.ip });
+    await auditLog('policy_update', req.user.id, { policyId: id, ipAddress: req.ip }, req.tenantId);
     res.json({ success: true, policy: r.rows[0] });
   } catch (e) {
     console.error('Error updating policy:', e);
@@ -853,7 +888,7 @@ app.delete('/policies/:id', authMiddleware, async (req, res) => {
   try {
     const r = await pool.query('DELETE FROM policies WHERE id=$1 AND user_id=$2 RETURNING id', [id, req.user.id]);
     if (r.rowCount === 0) return res.status(404).json({ error: 'Not found' });
-    await auditLog('policy_delete', req.user.id, { policyId: id, ipAddress: req.ip });
+    await auditLog('policy_delete', req.user.id, { policyId: id, ipAddress: req.ip }, req.tenantId);
     res.json({ success: true });
   } catch (e) {
     console.error('Error deleting policy:', e);
@@ -865,7 +900,7 @@ app.post('/policies/reset-defaults', authMiddleware, async (req, res) => {
   try {
     await pool.query('DELETE FROM policies WHERE user_id=$1', [req.user.id]);
     await ensureDefaultPolicies(req.user.id);
-    await auditLog('policy_reset_defaults', req.user.id, { ipAddress: req.ip });
+    await auditLog('policy_reset_defaults', req.user.id, { ipAddress: req.ip }, req.tenantId);
     const rows = await getPoliciesForUser(req.user.id);
     res.json({ success: true, policies: rows });
   } catch (e) {
@@ -880,8 +915,8 @@ app.post('/alerts/:id/feedback', authMiddleware, async (req, res) => {
   
   try {
     const result = await pool.query(
-      'UPDATE alerts SET feedback = $1 WHERE id = $2 AND user_id = $3 RETURNING id',
-      [feedback, id, req.user.id]
+      'UPDATE alerts SET feedback = $1 WHERE id = $2 AND tenant_id = $3 RETURNING id',
+      [feedback, id, req.tenantId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json({ success: true });
@@ -902,56 +937,35 @@ app.post('/hunter/query', authMiddleware, async (req, res) => {
 // Metrics
 app.get('/metrics', authMiddleware, async (req, res) => {
   try {
-    const totalResult = await pool.query(
-      'SELECT COUNT(*) as total FROM alerts WHERE user_id = $1',
-      [req.user.id]
-    );
-    const severityResult = await pool.query(
-      'SELECT severity, COUNT(*) as count FROM alerts WHERE user_id = $1 GROUP BY severity',
-      [req.user.id]
-    );
-    const statusResult = await pool.query(
-      'SELECT status, COUNT(*) as count FROM alerts WHERE user_id = $1 GROUP BY status',
-      [req.user.id]
-    );
-    const timeResult = await pool.query(
-      'SELECT AVG(analysis_time) as avg_time FROM alerts WHERE user_id = $1 AND analysis_time IS NOT NULL',
-      [req.user.id]
-    );
+    const totalResult = await pool.query('SELECT COUNT(*) as total FROM alerts WHERE tenant_id = $1', [req.tenantId]);
+    const severityResult = await pool.query('SELECT severity, COUNT(*) as count FROM alerts WHERE tenant_id = $1 GROUP BY severity', [req.tenantId]);
+    const statusResult = await pool.query('SELECT status, COUNT(*) as count FROM alerts WHERE tenant_id = $1 GROUP BY status', [req.tenantId]);
+    const timeResult = await pool.query('SELECT AVG(analysis_time) as avg_time FROM alerts WHERE tenant_id = $1 AND analysis_time IS NOT NULL', [req.tenantId]);
     const feedbackResult = await pool.query(
       `SELECT 
          SUM(CASE WHEN feedback = 'accurate' THEN 1 ELSE 0 END) as accurate,
          SUM(CASE WHEN feedback IS NOT NULL THEN 1 ELSE 0 END) as total_feedback
-       FROM alerts WHERE user_id = $1`,
-      [req.user.id]
+       FROM alerts WHERE tenant_id = $1`,
+      [req.tenantId]
     );
 
     // MTTI: avg(investigate_start - created_at); MTTR: avg(resolve_time - created_at)
     const mttiResult = await pool.query(
       `SELECT AVG(EXTRACT(EPOCH FROM (investigate_start - created_at))) as mtti_sec
-       FROM alerts WHERE user_id = $1 AND investigate_start IS NOT NULL`,
-      [req.user.id]
+       FROM alerts WHERE tenant_id = $1 AND investigate_start IS NOT NULL`,
+      [req.tenantId]
     );
     const mttrResult = await pool.query(
       `SELECT AVG(EXTRACT(EPOCH FROM (resolve_time - created_at))) as mttr_sec
-       FROM alerts WHERE user_id = $1 AND resolve_time IS NOT NULL`,
-      [req.user.id]
+       FROM alerts WHERE tenant_id = $1 AND resolve_time IS NOT NULL`,
+      [req.tenantId]
     );
     // Resolved alerts count based on resolve_time
-    const resolvedResult = await pool.query(
-      'SELECT COUNT(*) as resolved FROM alerts WHERE user_id = $1 AND resolve_time IS NOT NULL',
-      [req.user.id]
-    );
+    const resolvedResult = await pool.query('SELECT COUNT(*) as resolved FROM alerts WHERE tenant_id = $1 AND resolve_time IS NOT NULL', [req.tenantId]);
     // Investigated alerts count based on investigate_start
-    const investigatedResult = await pool.query(
-      'SELECT COUNT(*) as investigated FROM alerts WHERE user_id = $1 AND investigate_start IS NOT NULL',
-      [req.user.id]
-    );
+    const investigatedResult = await pool.query('SELECT COUNT(*) as investigated FROM alerts WHERE tenant_id = $1 AND investigate_start IS NOT NULL', [req.tenantId]);
     // Acknowledged alerts count based on ack_time
-    const acknowledgedResult = await pool.query(
-      'SELECT COUNT(*) as acknowledged FROM alerts WHERE user_id = $1 AND ack_time IS NOT NULL',
-      [req.user.id]
-    );
+    const acknowledgedResult = await pool.query('SELECT COUNT(*) as acknowledged FROM alerts WHERE tenant_id = $1 AND ack_time IS NOT NULL', [req.tenantId]);
     
     const severityCounts = {};
     severityResult.rows.forEach(row => {
@@ -1004,11 +1018,11 @@ app.get('/cases', authMiddleware, async (req, res) => {
         FROM cases c
         JOIN case_alerts ca ON ca.case_id = c.id
         JOIN alerts a ON a.id = ca.alert_id
-        WHERE a.user_id = $1
+        WHERE a.tenant_id = $1 AND c.tenant_id = $1 AND ca.tenant_id = $1
         GROUP BY c.id, c.severity, c.status, c.owner, c.created_at
       ) x
       ORDER BY COALESCE(x.latest, x.c_created) DESC, x.id DESC`;
-    const r = await pool.query(sql, [req.user.id]);
+    const r = await pool.query(sql, [req.tenantId]);
     res.json({ cases: r.rows });
   } catch (error) {
     console.error('Error fetching cases:', error);
@@ -1019,14 +1033,14 @@ app.get('/cases', authMiddleware, async (req, res) => {
 app.get('/cases/:id', authMiddleware, async (req, res) => {
   const caseId = parseInt(req.params.id, 10);
   try {
-    const caseRow = await pool.query('SELECT id, severity, status, owner, context, created_at FROM cases WHERE id=$1', [caseId]);
+    const caseRow = await pool.query('SELECT id, severity, status, owner, context, created_at FROM cases WHERE id=$1 AND tenant_id=$2', [caseId, req.tenantId]);
     if (caseRow.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const alertsSql = `
       SELECT a.id, a.created_at, a.severity, a.status, a.summary, a.fingerprint, a.source, a.entities
       FROM case_alerts ca JOIN alerts a ON a.id = ca.alert_id
-      WHERE ca.case_id = $1 AND a.user_id = $2
+      WHERE ca.case_id = $1 AND a.tenant_id = $2 AND ca.tenant_id = $2
       ORDER BY a.created_at DESC`;
-    const alerts = await pool.query(alertsSql, [caseId, req.user.id]);
+    const alerts = await pool.query(alertsSql, [caseId, req.tenantId]);
     // Aggregate impacted entities for convenience
     const impacted = new Set();
     for (const row of alerts.rows) {

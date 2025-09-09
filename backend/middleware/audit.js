@@ -1,11 +1,18 @@
 const { pool } = require('../database');
 
-async function auditLog(action, userId, details = {}) {
+async function auditLog(action, userId, details = {}, tenantId = null) {
   try {
-    await pool.query(
-      'INSERT INTO audit_logs (action, user_id, details, ip_address) VALUES ($1, $2, $3, $4)',
-      [action, userId, JSON.stringify(details), details.ipAddress || 'unknown']
-    );
+    if (tenantId) {
+      await pool.query(
+        'INSERT INTO audit_logs (action, user_id, details, ip_address, tenant_id) VALUES ($1, $2, $3, $4, $5)',
+        [action, userId, JSON.stringify(details), details.ipAddress || 'unknown', tenantId]
+      );
+    } else {
+      await pool.query(
+        'INSERT INTO audit_logs (action, user_id, details, ip_address) VALUES ($1, $2, $3, $4)',
+        [action, userId, JSON.stringify(details), details.ipAddress || 'unknown']
+      );
+    }
   } catch (error) {
     console.error('Failed to write audit log:', error);
   }

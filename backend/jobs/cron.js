@@ -15,9 +15,9 @@ function startSummarizerCron({ intervalMs = 15 * 60 * 1000 } = {}) {
   console.log(`[cron] Summarizer cron enabled, every ${Math.round(intervalMs/60000)} min`);
   setInterval(async () => {
     try {
-      const r = await pool.query('SELECT DISTINCT user_id, case_id FROM alerts WHERE case_id IS NOT NULL AND user_id IS NOT NULL');
+      const r = await pool.query('SELECT DISTINCT tenant_id, case_id FROM alerts WHERE case_id IS NOT NULL AND tenant_id IS NOT NULL');
       for (const row of r.rows) {
-        try { await summarizeCaseMemory(row.case_id, row.user_id); } catch (e) { console.warn('[cron] summarize failed for case', row.case_id, e.message); }
+        try { await summarizeCaseMemory(row.case_id, row.tenant_id); } catch (e) { console.warn('[cron] summarize failed for case', row.case_id, e.message); }
       }
     } catch (e) {
       console.error('[cron] job error:', e.message);
@@ -26,4 +26,3 @@ function startSummarizerCron({ intervalMs = 15 * 60 * 1000 } = {}) {
 }
 
 module.exports = { startSummarizerCron };
-

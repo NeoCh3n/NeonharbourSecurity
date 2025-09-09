@@ -76,13 +76,21 @@ async function parallelMap(items, mapper, { concurrency = 5 } = {}) {
   });
 }
 
-async function recordExecution({ approvalRequestId = null, tool, request, response, status, errorClass, retries = 0, startedAt = new Date(), finishedAt = new Date() }) {
+async function recordExecution({ tenantId = null, approvalRequestId = null, tool, request, response, status, errorClass, retries = 0, startedAt = new Date(), finishedAt = new Date() }) {
   try {
-    await pool.query(
-      `INSERT INTO action_executions (approval_request_id, tool, request, response, status, error_class, retries, started_at, finished_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [approvalRequestId, tool, request ? JSON.stringify(request) : null, response ? JSON.stringify(response) : null, status, errorClass || null, retries, startedAt, finishedAt]
-    );
+    if (tenantId) {
+      await pool.query(
+        `INSERT INTO action_executions (approval_request_id, tool, request, response, status, error_class, retries, started_at, finished_at, tenant_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [approvalRequestId, tool, request ? JSON.stringify(request) : null, response ? JSON.stringify(response) : null, status, errorClass || null, retries, startedAt, finishedAt, tenantId]
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO action_executions (approval_request_id, tool, request, response, status, error_class, retries, started_at, finished_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [approvalRequestId, tool, request ? JSON.stringify(request) : null, response ? JSON.stringify(response) : null, status, errorClass || null, retries, startedAt, finishedAt]
+      );
+    }
   } catch (e) {
     // Do not throw; logging failure shouldn't break flow
     // eslint-disable-next-line no-console
@@ -90,7 +98,7 @@ async function recordExecution({ approvalRequestId = null, tool, request, respon
   }
 }
 
-async function toolExecutor(toolName, execFn, { retries = 3, base = 300, factor = 2, jitter = true, approvalRequestId = null } = {}) {
+async function toolExecutor(toolName, execFn, { retries = 3, base = 300, factor = 2, jitter = true, approvalRequestId = null, tenantId = null } = {}) {
   const started = new Date();
   let attempts = 0;
   try {
@@ -98,11 +106,11 @@ async function toolExecutor(toolName, execFn, { retries = 3, base = 300, factor 
       attempts = attempt;
       return execFn();
     }, { retries, base, factor, jitter });
-    await recordExecution({ approvalRequestId, tool: toolName, request: null, response: result, status: 'success', retries: attempts - 1, startedAt: started, finishedAt: new Date() });
+    await recordExecution({ tenantId, approvalRequestId, tool: toolName, request: null, response: result, status: 'success', retries: attempts - 1, startedAt: started, finishedAt: new Date() });
     return result;
   } catch (err) {
     const errorClass = err.__errorClass || classifyError(err).class;
-    await recordExecution({ approvalRequestId, tool: toolName, request: null, response: { error: err.message }, status: 'failure', errorClass, retries: attempts - 1, startedAt: started, finishedAt: new Date() });
+    await recordExecution({ tenantId, approvalRequestId, tool: toolName, request: null, response: { error: err.message }, status: 'failure', errorClass, retries: attempts - 1, startedAt: started, finishedAt: new Date() });
     throw err;
   }
 }
@@ -115,4 +123,3 @@ module.exports = {
   parallelMap,
   toolExecutor,
 };
-

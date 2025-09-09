@@ -11,8 +11,8 @@ export default function AlertsListPage() {
   const navigate = useNavigate();
 
   const [params, setParams] = useSearchParams();
-  const initial = (params.get('f') as any) || 'all';
-  const [filter, setFilter] = useState<'all'|'me'|'unassigned'>(initial === 'me' || initial === 'unassigned' ? initial : 'all');
+  const fParam = params.get('f');
+  const [filter, setFilter] = useState<'all'|'me'|'unassigned'>(fParam === 'me' || fParam === 'unassigned' ? (fParam as any) : 'all');
   async function load() {
     try {
       const params = filter === 'all' ? {} : { assigned: filter === 'me' ? 'me' : 'unassigned' as any };
@@ -26,6 +26,11 @@ export default function AlertsListPage() {
   }
   useEffect(() => { void load(); }, [filter]);
   useEffect(() => { setParams({ f: filter }, { replace: true }); }, [filter]);
+  useEffect(() => {
+    // Sync state when URL param changes (e.g. via sidebar subnav)
+    const v = fParam === 'me' ? 'me' : fParam === 'unassigned' ? 'unassigned' : 'all';
+    setFilter(v);
+  }, [fParam]);
 
   async function openDetail(id: number) {
     // Navigate to modern detail page; immediate route change provides timely feedback
@@ -42,10 +47,22 @@ export default function AlertsListPage() {
           <div className="text-sm text-muted">Newest appear on top</div>
         </div>
         <div className="mt-2 flex items-center gap-2 text-sm">
-          <button className={`px-2 py-1 rounded-md border ${filter==='all'?'btn-gradient border-border':'border-border'}`} onClick={()=>setFilter('all')}>All</button>
-          <button className={`px-2 py-1 rounded-md border ${filter==='me'?'btn-gradient border-border':'border-border'}`} onClick={()=>setFilter('me')}>Assigned to me</button>
-          <button className={`px-2 py-1 rounded-md border ${filter==='unassigned'?'btn-gradient border-border':'border-border'}`} onClick={()=>setFilter('unassigned')}>Unassigned</button>
-          <button className="ml-auto px-2 py-1 rounded-md border border-border" onClick={()=>load()}>Refresh</button>
+          <button
+            aria-pressed={filter==='all'}
+            className={`px-2 py-1 rounded-md border ${filter==='all' ? 'bg-primary text-primaryFg border-transparent' : 'border-border hover:bg-surfaceAlt'}`}
+            onClick={()=>setFilter('all')}
+          >All</button>
+          <button
+            aria-pressed={filter==='me'}
+            className={`px-2 py-1 rounded-md border ${filter==='me' ? 'bg-primary text-primaryFg border-transparent' : 'border-border hover:bg-surfaceAlt'}`}
+            onClick={()=>setFilter('me')}
+          >Assigned to me</button>
+          <button
+            aria-pressed={filter==='unassigned'}
+            className={`px-2 py-1 rounded-md border ${filter==='unassigned' ? 'bg-primary text-primaryFg border-transparent' : 'border-border hover:bg-surfaceAlt'}`}
+            onClick={()=>setFilter('unassigned')}
+          >Unassigned</button>
+          <button className="ml-auto px-2 py-1 rounded-md border border-border hover:bg-surfaceAlt" onClick={()=>load()}>Refresh</button>
         </div>
       </div>
       {error && <div className="text-danger text-sm" role="alert">{error}</div>}

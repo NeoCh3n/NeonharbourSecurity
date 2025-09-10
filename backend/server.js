@@ -1463,9 +1463,9 @@ app.get('/nav/counts', authMiddleware, async (req, res) => {
 app.get('/cases', authMiddleware, async (req, res) => {
   try {
     const sql = `
-      SELECT x.id, x.severity, x.status, x.owner, x.alert_count, x.latest
+      SELECT x.id, x.severity, x.status, x.owner, x.alert_count, x.latest, x.context
       FROM (
-        SELECT c.id, c.severity, c.status, c.owner,
+        SELECT c.id, c.severity, c.status, c.owner, c.context,
                COUNT(a.id) AS alert_count,
                MAX(a.created_at) AS latest,
                c.created_at AS c_created
@@ -1473,7 +1473,7 @@ app.get('/cases', authMiddleware, async (req, res) => {
         JOIN case_alerts ca ON ca.case_id = c.id
         JOIN alerts a ON a.id = ca.alert_id
         WHERE a.tenant_id = $1 AND c.tenant_id = $1 AND ca.tenant_id = $1
-        GROUP BY c.id, c.severity, c.status, c.owner, c.created_at
+        GROUP BY c.id, c.severity, c.status, c.owner, c.created_at, c.context
       ) x
       ORDER BY COALESCE(x.latest, x.c_created) DESC, x.id DESC`;
     const r = await pool.query(sql, [req.tenantId]);
@@ -1506,6 +1506,34 @@ app.get('/cases/:id', authMiddleware, async (req, res) => {
     res.json({ case: caseRow.rows[0], alerts: alerts.rows, impacted: Array.from(impacted).slice(0, 100) });
   } catch (error) {
     console.error('Error fetching case detail:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Create a new case (optionally linking an existing alert and saving an initial finding as memory)
+app.post('/cases', authMiddleware, async (req, res) => {
+  const { severity = 'medium', status = 'open', owner = null, context = {}, alertId = null, finding = null, title = null } = req.body || {};
+  try {
+    const r = await pool.query(
+      'INSERT INTO cases (severity, status, owner, context, tenant_id) VALUES ($1,$2,$3,$4,$5) RETURNING id, created_at, severity, status, owner',
+      [String(severity||'medium').toLowerCase(), String(status||'open').toLowerCase(), owner, context || {}, req.tenantId]
+    );
+    const caseId = r.rows[0].id;
+    if (alertId) {
+      try {
+        await pool.query('INSERT INTO case_alerts (case_id, alert_id, tenant_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [caseId, alertId, req.tenantId]);
+        await pool.query('UPDATE alerts SET case_id=$1 WHERE id=$2 AND tenant_id=$3', [caseId, alertId, req.tenantId]);
+      } catch {}
+    }
+    if (finding) {
+      try {
+        await createSession({ tenantId: req.tenantId, userId: req.user.id, caseId, alertId: alertId || null, title: title || 'Hunter finding', context: {} });
+        await addMemory({ tenantId: req.tenantId, userId: req.user.id, caseId, sessionId: null, type: 'note', key: 'hunter_finding', value: finding, tags: ['hunter'], importance: 0.5 });
+      } catch {}
+    }
+    res.json({ success: true, case: { id: caseId, severity: r.rows[0].severity, status: r.rows[0].status, owner: r.rows[0].owner } });
+  } catch (e) {
+    console.error('Error creating case:', e);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

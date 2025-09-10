@@ -4,6 +4,7 @@ import { DataTable } from '../components/datatable/DataTable';
 import { downloadCSV, toCSV } from '../components/datatable/csv';
 import { hunterApi } from '../services/api';
 import { planApi } from '../services/api';
+import apiRequest, { casesApi } from '../services/api';
 
 type AlertRow = {
   id: string;
@@ -53,6 +54,9 @@ export default function ThreatHunterPage() {
   const [assocAlertId, setAssocAlertId] = useState('');
   const [assocPlan, setAssocPlan] = useState<any | null>(null);
   const [lastFinding, setLastFinding] = useState<any | null>(null);
+  const [caseMsg, setCaseMsg] = useState('');
+  const [busyCase, setBusyCase] = useState(false);
+  const [attachCaseId, setAttachCaseId] = useState('');
 
   const columns = useMemo<ColumnDef<AlertRow>[]>(() => [
     {
@@ -135,6 +139,31 @@ export default function ThreatHunterPage() {
     } catch {}
   }
 
+  async function createCaseFromFinding() {
+    if (!lastFinding) { setCaseMsg('No finding to save'); return; }
+    setBusyCase(true); setCaseMsg('');
+    try {
+      const body: any = { severity: 'medium', status: 'open', context: {}, finding: lastFinding, title: 'Hunter finding' };
+      if (assocAlertId) body.alertId = Number(assocAlertId);
+      const r = await apiRequest('/cases', { method: 'POST', body: JSON.stringify(body) });
+      if (r?.success) setCaseMsg(`Created case #${r.case.id}`); else setCaseMsg('Failed to create case');
+    } catch (e:any) {
+      setCaseMsg(e?.message || 'Failed to create case');
+    } finally { setBusyCase(false); }
+  }
+
+  async function attachFindingToCase() {
+    if (!attachCaseId || !lastFinding) { setCaseMsg('Enter case id and ensure a finding exists'); return; }
+    setBusyCase(true); setCaseMsg('');
+    try {
+      const payload = { type: 'note', key: 'hunter_finding', value: { answer: lastFinding.answer, evidence: (lastFinding.evidence||[]).slice(0,3) }, tags: ['hunter'], importance: 0.5 };
+      await casesApi.addMemory(Number(attachCaseId), payload);
+      setCaseMsg(`Attached to case #${attachCaseId}`);
+    } catch (e:any) {
+      setCaseMsg(e?.message || 'Attach failed');
+    } finally { setBusyCase(false); }
+  }
+
   return (
     <div className="space-y-3">
       <div className="bg-surface rounded-lg border border-border p-3 text-sm text-muted">
@@ -179,6 +208,15 @@ export default function ThreatHunterPage() {
                   {m.evidence && <pre className="mt-1 p-2 bg-surfaceAlt rounded-md overflow-auto text-xs">{JSON.stringify(m.evidence, null, 2)}</pre>}
                 </div>
               ))}
+            </div>
+            <div className="flex items-end gap-2 text-sm">
+              <div>
+                <label className="block text-muted text-xs">Attach to Case ID</label>
+                <input className="px-2 py-1 border border-border rounded-md" value={attachCaseId} onChange={e=>setAttachCaseId(e.target.value)} placeholder="e.g., 123" />
+              </div>
+              <button className="px-3 py-1.5 border border-border rounded-md" onClick={attachFindingToCase} disabled={busyCase || !lastFinding}>Attach</button>
+              <button className="px-3 py-1.5 border border-border rounded-md btn-gradient" onClick={createCaseFromFinding} disabled={busyCase || !lastFinding}>{busyCase ? 'Working…' : 'Create Case from Latest'}</button>
+              {caseMsg && <div className="text-xs text-muted">{caseMsg}</div>}
             </div>
             <DataTable columns={columns} data={rows} height={360} />
           </div>

@@ -214,7 +214,7 @@ const { getOrInitCasePlan, createSession, addMemory, listCaseMemory, getCasePlan
 const { summarizeCaseMemory, summarizeAllCasesForUser } = require('./memory/summarizer');
 const { getSetting, setSetting } = require('./config/settings');
 const { evaluateAction, checkSegregationOfDuties, getPoliciesForUser, ensureDefaultPolicies } = require('./policy/engine');
-const { toolExecutor } = require('./utils/execution');
+const { toolExecutor, classifyError } = require('./utils/execution');
 const { getTool } = require('./tools');
 const { auditLog } = require('./middleware/audit');
 
@@ -833,6 +833,29 @@ app.post('/admin/settings/llm', authMiddleware, requireAdmin, async (req, res) =
   } catch (e) {
     console.error('Error updating LLM setting:', e);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Admin: validate LLM connectivity using provided inputs (does not persist)
+app.post('/admin/settings/llm/validate', authMiddleware, requireAdmin, async (req, res) => {
+  const { provider, baseUrl, model, apiKey } = req.body || {};
+  const p = String(provider || '').toLowerCase();
+  if (!['deepseek', 'local'].includes(p)) return res.status(400).json({ error: 'Invalid provider' });
+  const axios = require('axios');
+  const base = String(baseUrl || (p === 'deepseek' ? (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1') : (process.env.LOCAL_LLM_BASE_URL || 'http://127.0.0.1:1234/v1'))).replace(/\/$/, '');
+  const mdl = String(model || (p === 'deepseek' ? (process.env.DEEPSEEK_MODEL || 'deepseek-chat') : (process.env.LOCAL_LLM_MODEL || 'zysec-ai_-_securityllm')));
+  const key = p === 'deepseek' ? (apiKey || process.env.DEEPSEEK_API_KEY || '') : '';
+  if (p === 'deepseek' && !key) return res.status(400).json({ error: 'DeepSeek API key is required for validation' });
+  try {
+    const headers = key ? { Authorization: `Bearer ${key}` } : {};
+    const payload = { model: mdl, messages: [{ role: 'user', content: 'ping' }], temperature: 0, max_tokens: 5 };
+    const r = await axios.post(`${base}/chat/completions`, payload, { headers, timeout: 7000 });
+    const content = r?.data?.choices?.[0]?.message?.content || '';
+    res.json({ ok: true, provider: p, base, model: mdl, sample: String(content).slice(0, 60) });
+  } catch (e) {
+    const info = classifyError(e);
+    const msg = e && e.response && e.response.data && (e.response.data.error || e.response.data.message) ? (e.response.data.error || e.response.data.message) : (e.message || 'Validation failed');
+    res.status(400).json({ ok: false, provider: p, base, model: mdl, errorClass: info.class, error: msg });
   }
 });
 

@@ -37,6 +37,9 @@ async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<
       } catch {
         // ignore
       }
+      if (response.status === 401) {
+        try { localStorage.removeItem('token'); } catch {}
+      }
       throw new ApiError(errorMessage, response.status);
     }
     return await response.json();

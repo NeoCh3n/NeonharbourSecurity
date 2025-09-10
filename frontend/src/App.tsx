@@ -11,7 +11,7 @@ export default function App() {
   const rightPanelOpen = useUI(s => s.rightPanelOpen);
   const location = useLocation();
   const navigate = useNavigate();
-  const { refresh } = useAuth();
+  const { refresh, token, me, loading } = useAuth();
 
   // Example: redirect unknown root to dashboard
   useEffect(() => {
@@ -22,6 +22,19 @@ export default function App() {
 
   // Load current user on app mount (keeps header/user info in sync)
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // Global auth guard: redirect unauthenticated users to /ingest for protected routes
+  useEffect(() => {
+    const publicPaths = new Set(['/login', '/ingest']);
+    if (publicPaths.has(location.pathname)) return;
+    if (!token) {
+      navigate('/ingest');
+      return;
+    }
+    if (!loading && !me) {
+      navigate('/ingest');
+    }
+  }, [location.pathname, token, me, loading, navigate]);
 
   return (
     <div className="desktop-frame min-h-full grid" style={{ gridTemplateRows: '56px 1fr' }}>

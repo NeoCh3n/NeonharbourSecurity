@@ -22,12 +22,19 @@ async function generatePlan(unified, analysis, opts = {}) {
     'Any lateral movement or exfiltration observed?',
     'What immediate containment is needed?'
   ];
+  // Default decision heuristic (overridden by LLM if present)
+  const decision = { status: isHigh ? 'needs_review' : 'needs_review', disposition: 'uncertain', rationale: 'Requires analyst review' };
 
   // Attempt AI-driven plan tailoring
   try {
-    const prompt = `You are a senior SOC analyst. Given a normalized alert and a brief analysis summary/timeline, produce an investigation plan JSON.
-Return ONLY strict JSON with keys: questions (array of 4-8 concise questions tailored to determine if it's a true positive or false positive and what to do next), steps (array of {id,title,required?}).
-Prefer actionable, context-aware items referring to user, IP, host, URL, file hash if present.\n\nALERT: ${JSON.stringify(unified)}\nANALYSIS: ${JSON.stringify(analysis)}\n\nPRIOR CONTEXT (optional, memory summary across related alerts/sessions):\n${opts.memorySummary || '(none)'}\n`;
+    const prompt = `You are a senior SOC analyst.
+Given a normalized alert and a brief analysis summary/timeline, produce an investigation plan JSON.
+Return ONLY strict JSON with keys:
+- steps: array of 5-10 concise steps as {id,title,required?} tailored to THIS alert (prefer concrete, context-aware actions using available entities: user, IP, host, URL, file hash).
+- questions: array of 4-8 concise questions to confirm true/false positive and containment.
+- decision: { status: one of [resolved, needs_review, escalate], disposition: one of [true_positive,false_positive,uncertain], rationale: string (<=200 chars) }.
+Rules: 1) Do not include prose or backticks. 2) JSON only. 3) If evidence strongly indicates false positive and low severity, you may set decision.status="resolved" and disposition="false_positive"; if critical indicators present, set status="escalate" and disposition="true_positive".
+\nALERT: ${JSON.stringify(unified)}\nANALYSIS: ${JSON.stringify(analysis)}\nPRIOR CONTEXT: ${opts.memorySummary || '(none)'}\n`;
     const ai = await _callModel([
       { role: 'system', content: 'You output only strict JSON. No prose.' },
       { role: 'user', content: prompt }
@@ -39,10 +46,32 @@ Prefer actionable, context-aware items referring to user, IP, host, URL, file ha
       if (Array.isArray(parsed.steps) && parsed.steps.length) {
         steps = parsed.steps.map((s, i) => ({ id: s.id || `s${i+1}`, title: s.title || 'Step', required: !!s.required, done: false })).slice(0, 10);
       }
+      if (parsed.decision && typeof parsed.decision === 'object') {
+        decision.status = ['resolved','needs_review','escalate'].includes(String(parsed.decision.status||'').toLowerCase()) ? String(parsed.decision.status).toLowerCase() : decision.status;
+        decision.disposition = ['true_positive','false_positive','uncertain'].includes(String(parsed.decision.disposition||'').toLowerCase()) ? String(parsed.decision.disposition).toLowerCase() : decision.disposition;
+        decision.rationale = parsed.decision.rationale || decision.rationale;
+      }
     }
   } catch {}
 
-  const plan = { status: 'pending', createdAt: now, steps, questions };
+  // Heuristic override if LLM did not set a decisive outcome
+  if (!decision || !decision.status || !decision.disposition) {
+    const category = String(unified?.category || '').toLowerCase();
+    const action = String(unified?.action || '').toLowerCase();
+    const benignActions = new Set(['login_success','email_delivered']);
+    const benignCategories = new Set(['informational','info']);
+    if (!isHigh && (benignActions.has(action) || benignCategories.has(category))) {
+      decision.status = 'resolved';
+      decision.disposition = 'false_positive';
+      decision.rationale = decision.rationale || 'Benign low-severity pattern';
+    } else if (isHigh) {
+      decision.status = 'escalate';
+      decision.disposition = 'true_positive';
+      decision.rationale = decision.rationale || 'High severity indicators present';
+    }
+  }
+
+  const plan = { status: 'pending', createdAt: now, steps, questions, decision };
   // Suggested queries tailored to context
   const user = unified?.principal?.user || unified?.principal?.email || '';
   const ip = unified?.src?.ip || unified?.dst?.ip || '';

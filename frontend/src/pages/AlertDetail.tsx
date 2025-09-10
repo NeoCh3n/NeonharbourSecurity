@@ -164,6 +164,16 @@ export default function AlertDetailPage() {
               <div className="font-semibold">Plan (AI generated)</div>
               {plan ? (
                 <div className="mt-2">
+                  {plan.plan?.decision && (
+                    <div className="mb-2 text-sm">
+                      <div className="text-xs text-muted">Recommended decision</div>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        <span className="px-2 py-0.5 rounded bg-surfaceAlt border border-border">Status: {plan.plan.decision.status}</span>
+                        <span className="px-2 py-0.5 rounded bg-surfaceAlt border border-border">Disposition: {plan.plan.decision.disposition}</span>
+                      </div>
+                      {plan.plan.decision.rationale && <div className="text-xs text-muted mt-1">{plan.plan.decision.rationale}</div>}
+                    </div>
+                  )}
                   <div className="text-sm text-muted">步骤 / Steps</div>
                   <ul>
                     {(plan.plan?.steps || []).map((s: any) => (

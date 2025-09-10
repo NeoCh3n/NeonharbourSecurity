@@ -230,21 +230,49 @@ function severityOrder(sev) {
   }
 }
 
-function decideAutoTriage(unified, analysis) {
+async function decideAutoTriage(unified, analysis, mitre = null) {
+  const { getTriageConfig } = require('./config/triage');
+  const cfg = await getTriageConfig();
   const sev = String((analysis?.severity || unified?.severity || 'low')).toLowerCase();
   const action = String(unified?.action || '').toLowerCase();
   const category = String(unified?.category || '').toLowerCase();
-  const benignActions = new Set(['login_success', 'email_delivered']);
-  const benignCategories = new Set(['informational', 'info']);
-  // Heuristics for MVP
-  if (sev === 'low' && (benignActions.has(action) || benignCategories.has(category))) {
-    return { disposition: 'false_positive', status: 'closed', priority: 'low', needEscalate: false, reason: 'Benign low-severity pattern' };
+  const benignActions = new Set(cfg.benignActions || []);
+  const benignCategories = new Set(cfg.benignCategories || []);
+  const escalateSev = new Set(cfg.escalateSeverities || ['high','critical']);
+  const mitreConf = (mitre && typeof mitre.confidence === 'number') ? mitre.confidence : null;
+
+  // High-risk indicators (keep strict to avoid blocking benign auto-close)
+  function hasHighRiskIndicators() {
+    try {
+      const entities = Array.isArray(unified?.entities) ? unified.entities : [];
+      // File hashes strongly indicate potential malware
+      const hash = entities.find(e => /sha\d*/i.test(String(e.type||'')) || /^[a-f0-9]{32,64}$/i.test(String(e.value||'')));
+      if (hash) return true;
+      // VirusTotal malicious count above threshold
+      const vt = (analysis?.evidence || []).find((e) => e && (e.type === 'virustotal' || (e.data && typeof e.data === 'object')));
+      const malicious = vt && ((vt.malicious ?? vt?.data?.attributes?.last_analysis_stats?.malicious) || 0);
+      if (malicious >= (cfg.vtMaliciousMin || 1)) return true;
+      // Do NOT treat multiple entity types in a single alert as high-risk by itself.
+    } catch {}
+    return false;
   }
-  if (sev === 'high' || sev === 'critical') {
+
+  // 1) Escalate severe
+  if (escalateSev.has(sev)) {
     return { disposition: 'true_positive', status: 'needs_review', priority: 'high', needEscalate: true, reason: `Auto escalate ${sev}` };
   }
-  // Medium or unknown → uncertain
-  return { disposition: 'uncertain', status: 'needs_review', priority: 'medium', needEscalate: false, reason: 'Requires analyst review' };
+  // 1b) Escalate on high MITRE confidence
+  if (typeof mitreConf === 'number' && mitreConf >= (cfg.mitreConfidenceHigh ?? 0.6)) {
+    return { disposition: 'true_positive', status: 'needs_review', priority: 'high', needEscalate: true, reason: `MITRE confidence ${mitreConf.toFixed(2)} ≥ ${(cfg.mitreConfidenceHigh ?? 0.6)}` };
+  }
+  // 2) Auto-resolve benign low without high-risk indicators
+  const isLow = (cfg.lowSeverity || ['low']).includes(sev);
+  if (isLow && (benignActions.has(action) || benignCategories.has(category)) && !hasHighRiskIndicators() && (mitreConf == null || mitreConf <= (cfg.mitreConfidenceLow ?? 0.3))) {
+    return { disposition: 'false_positive', status: 'closed', priority: 'low', needEscalate: false, reason: 'Benign low-severity pattern' };
+  }
+  // 3) Default: human review
+  const priority = sev === 'medium' ? 'medium' : 'low';
+  return { disposition: 'uncertain', status: 'needs_review', priority, needEscalate: false, reason: 'Requires analyst review' };
 }
 
 // Helper to process and persist alert objects
@@ -329,11 +357,29 @@ async function processAlertsForUser(alertObjs, userId, tenantId) {
         ]
       );
       try { await linkAlertToCase(tenantId, caseId, result.rows[0].id); } catch {}
-      // Auto-triage
+      // Auto-triage (plan decision takes precedence when present)
       try {
-        const triage = decideAutoTriage(unified, analysis);
+        let triage = await decideAutoTriage(unified, analysis, mitre);
+        const dec = plan && plan.decision ? plan.decision : null;
+        if (dec && typeof dec === 'object') {
+          const dStatus = String(dec.status || '').toLowerCase();
+          const dDisp = String(dec.disposition || '').toLowerCase();
+          if (['resolved','needs_review','escalate'].includes(dStatus)) {
+            if (dStatus === 'resolved') {
+              triage = { disposition: ['true_positive','false_positive','uncertain'].includes(dDisp)?dDisp:'false_positive', status: 'resolved', priority: 'low', needEscalate: false, reason: dec.rationale || 'Plan decision' };
+            } else if (dStatus === 'escalate') {
+              triage = { disposition: ['true_positive','false_positive','uncertain'].includes(dDisp)?dDisp:'true_positive', status: 'needs_review', priority: 'high', needEscalate: true, reason: dec.rationale || 'Plan decision escalate' };
+            } else {
+              triage = { disposition: ['true_positive','false_positive','uncertain'].includes(dDisp)?dDisp:'uncertain', status: 'needs_review', priority: triage.priority || 'medium', needEscalate: false, reason: dec.rationale || 'Plan decision review' };
+            }
+          }
+        }
+
+        const setResolveTime = (triage.status === 'closed' || triage.status === 'resolved');
         await pool.query(
-          'UPDATE alerts SET status=$1, priority=$2, disposition=$3, escalated=$4, feedback=COALESCE(feedback,$5) WHERE id=$6 AND tenant_id=$7',
+          setResolveTime
+            ? 'UPDATE alerts SET status=$1, priority=$2, disposition=$3, escalated=$4, feedback=COALESCE(feedback,$5), resolve_time=COALESCE(resolve_time, NOW()) WHERE id=$6 AND tenant_id=$7'
+            : 'UPDATE alerts SET status=$1, priority=$2, disposition=$3, escalated=$4, feedback=COALESCE(feedback,$5) WHERE id=$6 AND tenant_id=$7',
           [triage.status, triage.priority, triage.disposition, triage.needEscalate, triage.reason, result.rows[0].id, tenantId]
         );
         // Auto-suppress fingerprint for false positives (time-boxed)
@@ -581,6 +627,40 @@ app.get('/alerts/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// Bulk re-triage open alerts using current rules (admin only)
+app.post('/alerts/auto-triage', authMiddleware, requireAdmin, async (req, res) => {
+  const limit = Math.min(1000, parseInt(String(req.body?.limit || '200'), 10) || 200);
+  try {
+    const r = await pool.query(
+      "SELECT id, raw, severity, category, action, entities, mitre FROM alerts WHERE tenant_id=$1 AND COALESCE(status,'') NOT IN ('resolved','closed') ORDER BY id DESC LIMIT $2",
+      [req.tenantId, limit]
+    );
+    let updated = 0;
+    for (const row of r.rows) {
+      try {
+        const raw = typeof row.raw === 'object' ? row.raw : (row.raw ? JSON.parse(row.raw) : {});
+        const { toUnifiedAlert } = require('./normalizers');
+        const unified = toUnifiedAlert(raw || {});
+        const analysis = { severity: row.severity || unified.severity || 'low', evidence: [] };
+        const mitreObj = typeof row.mitre === 'object' ? row.mitre : (row.mitre ? JSON.parse(row.mitre) : null);
+        const triage = await decideAutoTriage(unified, analysis, mitreObj);
+        const setResolveTime = (triage.status === 'closed' || triage.status === 'resolved');
+        await pool.query(
+          setResolveTime
+            ? 'UPDATE alerts SET status=$1, priority=$2, disposition=$3, escalated=$4, feedback=COALESCE(feedback,$5), resolve_time=COALESCE(resolve_time, NOW()) WHERE id=$6 AND tenant_id=$7'
+            : 'UPDATE alerts SET status=$1, priority=$2, disposition=$3, escalated=$4, feedback=COALESCE(feedback,$5) WHERE id=$6 AND tenant_id=$7',
+          [triage.status, triage.priority, triage.disposition, triage.needEscalate, triage.reason, row.id, req.tenantId]
+        );
+        updated++;
+      } catch {}
+    }
+    res.json({ success: true, updated });
+  } catch (e) {
+    console.error('Auto-triage bulk error:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Re-run AI analysis on an alert with current provider settings
 app.post('/alerts/:id/reanalyze', authMiddleware, async (req, res) => {
   const id = parseInt(req.params.id, 10);
@@ -730,6 +810,60 @@ app.post('/alerts/:id/plan', authMiddleware, async (req, res) => {
   }
 });
 
+// Apply automated decision to the alert (from plan.decision if present; else triage rules)
+app.post('/alerts/:id/auto-decide', authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const r = await pool.query('SELECT raw, plan, summary, severity, category, action, entities, principal, asset, mitre FROM alerts WHERE id=$1 AND tenant_id=$2', [id, req.tenantId]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const row = r.rows[0];
+    const raw = typeof row.raw === 'object' ? row.raw : (row.raw ? JSON.parse(row.raw) : {});
+    const plan = typeof row.plan === 'object' ? row.plan : (row.plan ? JSON.parse(row.plan) : {});
+    const { toUnifiedAlert } = require('./normalizers');
+    const { generateRecommendations } = require('./planning/plan');
+    const unified = toUnifiedAlert(raw || {});
+    const mitre = typeof row.mitre === 'object' ? row.mitre : (row.mitre ? JSON.parse(row.mitre) : null);
+    let triage = await decideAutoTriage(unified, { severity: row.severity || unified.severity }, mitre);
+    const dec = plan && plan.decision ? plan.decision : null;
+    if (dec && typeof dec === 'object') {
+      const dStatus = String(dec.status || '').toLowerCase();
+      const dDisp = String(dec.disposition || '').toLowerCase();
+      if (['resolved','needs_review','escalate'].includes(dStatus)) {
+        if (dStatus === 'resolved') {
+          triage = { disposition: ['true_positive','false_positive','uncertain'].includes(dDisp)?dDisp:'false_positive', status: 'resolved', priority: 'low', needEscalate: false, reason: dec.rationale || 'Plan decision' };
+        } else if (dStatus === 'escalate') {
+          triage = { disposition: ['true_positive','false_positive','uncertain'].includes(dDisp)?dDisp:'true_positive', status: 'needs_review', priority: 'high', needEscalate: true, reason: dec.rationale || 'Plan decision escalate' };
+        } else {
+          triage = { disposition: ['true_positive','false_positive','uncertain'].includes(dDisp)?dDisp:'uncertain', status: 'needs_review', priority: triage.priority || 'medium', needEscalate: false, reason: dec.rationale || 'Plan decision review' };
+        }
+      }
+    }
+    const setResolveTime = (triage.status === 'closed' || triage.status === 'resolved');
+    await pool.query(
+      setResolveTime
+        ? 'UPDATE alerts SET status=$1, priority=$2, disposition=$3, escalated=$4, feedback=COALESCE(feedback,$5), resolve_time=COALESCE(resolve_time, NOW()) WHERE id=$6 AND tenant_id=$7'
+        : 'UPDATE alerts SET status=$1, priority=$2, disposition=$3, escalated=$4, feedback=COALESCE(feedback,$5) WHERE id=$6 AND tenant_id=$7',
+      [triage.status, triage.priority, triage.disposition, triage.needEscalate, triage.reason, id, req.tenantId]
+    );
+    if (triage.needEscalate) {
+      const recs = generateRecommendations(unified) || [];
+      const rec = Array.isArray(recs) && recs.length ? recs[0] : null;
+      const suggestedAction = rec?.action || (unified?.principal ? 'disable-account' : (unified?.asset ? 'isolate-endpoint' : 'containment'));
+      try {
+        await pool.query(
+          `INSERT INTO approval_requests (user_id, alert_id, action, parameters, status, reason, trace_id, tenant_id)
+           VALUES ($1,$2,$3,$4,'pending',$5,$6,$7)`,
+          [req.user.id, id, suggestedAction, JSON.stringify({ context: { severity: sevFrom({ severity: row.severity }, unified), principal: unified?.principal, asset: unified?.asset } }), 'Auto escalation', Math.random().toString(36).slice(2), req.tenantId]
+        );
+      } catch {}
+    }
+    const updated = await pool.query('SELECT * FROM alerts WHERE id=$1 AND tenant_id=$2', [id, req.tenantId]);
+    res.json({ success: true, alert: updated.rows[0], triage });
+  } catch (e) {
+    console.error('Auto-decision error:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 // Integrations: list user's configured data sources
 app.get('/integrations', authMiddleware, async (req, res) => {
   try {

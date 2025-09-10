@@ -153,12 +153,47 @@ async function analyzeAlert(alert) {
     ]);
 
     if (aiResp) {
-      try {
-        // Clean up AI response to ensure valid JSON
-        const cleanedResponse = aiResp.replace(/```json\n?|```/g, '').trim();
-        const parsed = JSON.parse(cleanedResponse);
-        summary = parsed.summary || summary;
-        severity = parsed.severity || severity;
+      // Attempt robust JSON extraction even if the model included prose
+      const tryParse = (text) => {
+        try {
+          return JSON.parse(text);
+        } catch { return null; }
+      };
+      let parsed = null;
+      // 1) Prefer fenced code block ```json ... ```
+      const fence = aiResp.match(/```json\s*([\s\S]*?)```/i) || aiResp.match(/```\s*([\s\S]*?)```/i);
+      if (fence && fence[1]) {
+        parsed = tryParse(fence[1].trim());
+      }
+      // 2) Try extracting first top-level JSON object by brace counting
+      if (!parsed) {
+        const s = String(aiResp);
+        const startIdx = s.indexOf('{');
+        if (startIdx >= 0) {
+          let depth = 0; let endIdx = -1;
+          for (let i = startIdx; i < s.length; i++) {
+            const ch = s[i];
+            if (ch === '{') depth++;
+            else if (ch === '}') { depth--; if (depth === 0) { endIdx = i; break; } }
+          }
+          if (endIdx > startIdx) {
+            const candidate = s.slice(startIdx, endIdx + 1);
+            parsed = tryParse(candidate);
+          }
+        }
+      }
+      // 3) Fall back to naive cleanup (remove code fences) and parse
+      if (!parsed) {
+        const cleaned = aiResp.replace(/```json\n?|```/g, '').trim();
+        parsed = tryParse(cleaned);
+      }
+
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.summary && typeof parsed.summary === 'string') {
+          summary = String(parsed.summary).trim();
+          if (summary.length > 600) summary = summary.slice(0, 600) + '…';
+        }
+        if (parsed.severity && typeof parsed.severity === 'string') severity = parsed.severity;
         if (Array.isArray(parsed.timeline) && parsed.timeline.length) {
           timeline = parsed.timeline.map(item => ({
             step: item.step || 'Unknown step',
@@ -167,9 +202,23 @@ async function analyzeAlert(alert) {
             evidence: item.evidence || 'No evidence'
           }));
         }
-      } catch (e) {
-        console.warn('Failed to parse AI response as JSON, using raw response:', e.message);
-        summary = aiResp;
+      } else {
+        // Do NOT return raw prompt/narrative. Build a compact summary from alert context
+        const parts = [];
+        const act = alert?.action || alert?.category || alert?.source || 'Alert';
+        const user = alert?.principal?.user || alert?.principal?.email || null;
+        const host = alert?.asset?.host || alert?.asset?.app || null;
+        const ip = alert?.src?.ip || alert?.dst?.ip || null;
+        const hashEnt = Array.isArray(alert?.entities) ? alert.entities.find(e => /sha/i.test(String(e.type||'')) || /^[a-f0-9]{32,64}$/i.test(String(e.value||''))) : null;
+        parts.push(String(act));
+        if (user) parts.push(`by ${user}`);
+        if (host) parts.push(`@ ${host}`);
+        const kv = [];
+        if (ip) kv.push(`ip:${ip}`);
+        if (hashEnt?.value) kv.push(`hash:${hashEnt.value}`);
+        if (kv.length) parts.push(`[${kv.join(', ')}]`);
+        summary = parts.join(' ');
+        severity = String(alert?.severity || severity);
       }
     }
   } catch (error) {

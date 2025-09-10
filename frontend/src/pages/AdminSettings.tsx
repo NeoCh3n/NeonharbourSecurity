@@ -11,6 +11,8 @@ export default function AdminSettingsPage() {
   const [refreshMsg, setRefreshMsg] = useState('');
   const [validateBusy, setValidateBusy] = useState(false);
   const [validateMsg, setValidateMsg] = useState('');
+  const [triageBusy, setTriageBusy] = useState(false);
+  const [triageMsg, setTriageMsg] = useState('');
 
   // Validation inputs (not persisted; optional convenience)
   const [dsApiKey, setDsApiKey] = useState('');
@@ -74,6 +76,20 @@ export default function AdminSettingsPage() {
       setValidateMsg(e?.message || 'Validation failed');
     } finally {
       setValidateBusy(false);
+    }
+  }
+
+  async function autoTriageOpen(limit: number = 500) {
+    setTriageBusy(true);
+    setTriageMsg('');
+    try {
+      const r = await apiRequest('/alerts/auto-triage', { method: 'POST', body: JSON.stringify({ limit }) });
+      if (r?.success) setTriageMsg(`Auto-triaged ${r.updated} alerts`);
+      else setTriageMsg('Auto-triage failed');
+    } catch (e:any) {
+      setTriageMsg(e?.message || 'Auto-triage failed');
+    } finally {
+      setTriageBusy(false);
     }
   }
 
@@ -145,6 +161,14 @@ export default function AdminSettingsPage() {
           <input type="checkbox" checked={allowSelfRegister} onChange={e=>setAllowSelfRegister(e.target.checked)} /> Allow self registration (POST /auth/register)
         </label>
         <div className="text-xs text-muted mt-2">When disabled, registration requests are rejected with 403. Admin can re-enable here.</div>
+      </div>
+      <div className="bg-surface rounded-lg border border-border p-3">
+        <div className="font-semibold mb-2">Operations</div>
+        <div className="flex items-center gap-2">
+          <button className="px-2 py-1 border border-border rounded" onClick={()=>autoTriageOpen(500)} disabled={triageBusy}>{triageBusy ? 'Auto-triaging…' : 'Auto-triage Open Alerts'}</button>
+          {triageMsg && <div className="text-xs text-muted" aria-live="polite">{triageMsg}</div>}
+        </div>
+        <div className="text-xs text-muted mt-2">Re-applies current triage rules to open alerts (status not resolved/closed). Admin only.</div>
       </div>
     </div>
   );

@@ -88,6 +88,25 @@ export default function AlertDetailPage() {
     }
   }
 
+  async function applyDecision() {
+    if (!id) return;
+    setActionMsg('');
+    setPendingAction('auto-decide');
+    try {
+      const r = await apiRequest(`/alerts/${id}/auto-decide`, { method: 'POST' });
+      if (r?.success) {
+        await loadAll();
+        setActionMsg('Decision applied');
+      } else {
+        setActionMsg('Failed to apply decision');
+      }
+    } catch (e:any) {
+      setActionMsg(e?.message || 'Failed to apply decision');
+    } finally {
+      setPendingAction('');
+    }
+  }
+
   const headerChips = useMemo(() => {
     const sev = detail?.severity || '-';
     const status = detail?.status || '-';
@@ -161,7 +180,14 @@ export default function AlertDetailPage() {
             </section>
 
             <section className="bg-surface rounded-lg border border-border p-3">
-              <div className="font-semibold">Plan (AI generated)</div>
+              <div className="flex items-center justify-between">
+                <div className="font-semibold">Plan (AI generated)</div>
+                {plan?.plan?.decision && (
+                  <button className="px-2 py-1 border border-border rounded-md" onClick={applyDecision} disabled={pendingAction==='auto-decide'}>
+                    {pendingAction==='auto-decide' ? 'Applying…' : 'Apply Decision'}
+                  </button>
+                )}
+              </div>
               {plan ? (
                 <div className="mt-2">
                   {plan.plan?.decision && (

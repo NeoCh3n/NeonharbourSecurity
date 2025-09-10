@@ -171,7 +171,7 @@ export default function DashboardPage() {
         </select>
         <button className="ml-auto px-3 py-1.5 border border-border rounded-md" onClick={() => setRight(true)}>Open Intel Panel</button>
         <div className="w-full" />
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex items-center gap-2 text-xs flex-wrap">
           <span className="text-muted">Severity:</span>
           <button aria-pressed={sev==='all'} className={`px-2 py-1 rounded-md border ${sev==='all'?'bg-primary text-primaryFg border-transparent':'border-border hover:bg-surfaceAlt'}`} onClick={()=>setSev('all')}>All</button>
           <button aria-pressed={sev==='critical'} className={`px-2 py-1 rounded-md border ${sev==='critical'?'bg-primary text-primaryFg border-transparent':'border-border hover:bg-surfaceAlt'}`} onClick={()=>setSev('critical')}>Critical</button>
@@ -182,6 +182,19 @@ export default function DashboardPage() {
             const q = sev==='all' ? '' : `&severity=${sev}`;
             navigate(`/alerts-list?f=all${q}`);
           }}>Open Triage</button>
+          {me?.isAdmin && (
+            <>
+              <span className="mx-2">|</span>
+              <span className="text-muted">Ops:</span>
+              <select className="px-2 py-1 rounded-md border border-border" value={opMode} onChange={e=>setOpMode(e.target.value as any)}>
+                <option value="triage">Refresh statuses</option>
+                <option value="close_low_benign">Force-close low benign</option>
+              </select>
+              <button className="px-2 py-1 rounded-md border border-border" onClick={runAutoTriage} disabled={opBusy}>{opBusy ? 'Running…' : 'Run'}</button>
+              <label className="flex items-center gap-1"><input type="checkbox" checked={autoRun} onChange={e=>setAutoRun(e.target.checked)} /> Auto (5m)</label>
+              {opMsg && <span className="text-muted">{opMsg}</span>}
+            </>
+          )}
         </div>
       </section>
 
@@ -225,23 +238,7 @@ export default function DashboardPage() {
         />
       </section>
 
-      {me?.isAdmin && (
-        <section className="bg-surface rounded-lg border border-border p-3 flex items-center gap-2">
-          <div className="font-semibold mr-2">Operations</div>
-          <label className="flex items-center gap-2 text-sm">
-            <span>Action</span>
-            <select className="px-2 py-1 border border-border rounded" value={opMode} onChange={e=>setOpMode(e.target.value as any)}>
-              <option value="triage">Refresh statuses</option>
-              <option value="close_low_benign">Force-close low benign</option>
-            </select>
-          </label>
-          <button className="px-2 py-1 border border-border rounded" onClick={runAutoTriage} disabled={opBusy}>{opBusy ? 'Running…' : 'Run Now'}</button>
-          <label className="flex items-center gap-2 text-sm ml-4">
-            <input type="checkbox" checked={autoRun} onChange={e=>setAutoRun(e.target.checked)} /> Auto every 5 min
-          </label>
-          {opMsg && <div className="text-xs text-muted ml-2" aria-live="polite">{opMsg}</div>}
-        </section>
-      )}
+      {/* Admin operations moved into the filter bar above to simplify layout */}
 
       {/* 2x2 layout for core insights */}
       <section className="grid grid-cols-12 gap-3">

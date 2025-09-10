@@ -76,26 +76,7 @@ export function Sidebar() {
             </li>
           ))}
         </ul>
-        <div className="mt-3 text-xs text-muted px-2 py-1 flex items-center justify-between">
-          <span>Setup</span>
-          <button className="text-xs underline" onClick={toggleSetup}>{setupOpen ? 'Hide' : 'Show'}</button>
-        </div>
-        {setupOpen && (
-          <ul className="space-y-1 mt-1">
-            {NAV.slice(5).map(item => (
-              <li key={item.to}>
-                <NavLink
-                  to={item.to}
-                  title={item.title || item.label}
-                  className={({ isActive }) => `flex items-center gap-3 px-2 py-2 rounded-md hover:bg-surfaceAlt ${isActive ? 'bg-surfaceAlt' : ''}`}
-                >
-                  <span aria-hidden className="text-base leading-none">{item.icon}</span>
-                  {expanded && <span className="text-sm">{item.label}</span>}
-                </NavLink>
-              </li>
-            ))}
-          </ul>
-        )}
+        {/* Setup moved to User Menu (top-right) */}
       </nav>
     </aside>
   );

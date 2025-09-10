@@ -423,7 +423,7 @@ app.post('/alerts/ingest', authMiddleware, async (req, res) => {
 app.get('/alerts', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, created_at as "createdAt", source, status, severity, assigned_to as "assignedTo" FROM alerts WHERE tenant_id = $1 ORDER BY created_at DESC',
+      'SELECT id, created_at as "createdAt", source, status, severity, assigned_to as "assignedTo", escalated, disposition FROM alerts WHERE tenant_id = $1 ORDER BY created_at DESC',
       [req.tenantId]
     );
     res.json({ alerts: result.rows });

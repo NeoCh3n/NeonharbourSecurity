@@ -54,7 +54,7 @@
 
 html, body, #root { height: 100%; }
 
-body { background: var(--bg); }
+body { background: var(--bg); color: var(--text); }
 
 .container-1280 {
   max-width: 1280px;
@@ -104,3 +104,16 @@ body { background: var(--bg); }
   box-shadow: 0 8px 20px rgba(45,123,255,0.35);
 }
 .btn-gradient:hover { filter: brightness(1.03); }
+
+/* Theme utility classes mapping to CSS variables */
+.text-text { color: var(--text); }
+.text-muted { color: var(--muted); }
+.bg-surface { background-color: var(--surface); }
+.bg-surfaceAlt { background-color: var(--surface-alt); }
+.border-border { border-color: var(--border); }
+.bg-primary { background-color: var(--primary); }
+.text-primaryFg { color: var(--primary-fg); }
+.text-success { color: var(--success); }
+.text-warning { color: var(--warning); }
+.text-danger { color: var(--danger); }
+.text-info { color: var(--info); }

@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { approvalsApi } from '../services/api';
+import { useNavCounts } from '../store/navCounts';
 
 export default function ApprovalsPage() {
   const [inbox, setInbox] = useState<any[]>([]);
   const [mine, setMine] = useState<any[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const navCounts = useNavCounts();
 
   async function refresh() {
     try {
@@ -21,12 +23,26 @@ export default function ApprovalsPage() {
 
   async function approve(id: number) {
     setBusy(true);
-    try { await approvalsApi.approve(id); await refresh(); } catch (e:any) { setError(e?.message || 'Approve failed'); } finally { setBusy(false); }
+    try {
+      await approvalsApi.approve(id);
+      await refresh();
+      // Immediately refresh sidebar badges
+      await navCounts.refresh();
+    } catch (e:any) {
+      setError(e?.message || 'Approve failed');
+    } finally { setBusy(false); }
   }
   async function deny(id: number) {
     const reason = prompt('Reason for denial?') || '';
     setBusy(true);
-    try { await approvalsApi.deny(id, reason); await refresh(); } catch (e:any) { setError(e?.message || 'Deny failed'); } finally { setBusy(false); }
+    try {
+      await approvalsApi.deny(id, reason);
+      await refresh();
+      // Immediately refresh sidebar badges
+      await navCounts.refresh();
+    } catch (e:any) {
+      setError(e?.message || 'Deny failed');
+    } finally { setBusy(false); }
   }
 
   return (
@@ -94,4 +110,3 @@ export default function ApprovalsPage() {
     </div>
   );
 }
-

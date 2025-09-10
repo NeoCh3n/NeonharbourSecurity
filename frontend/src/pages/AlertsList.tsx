@@ -20,10 +20,12 @@ export default function AlertsListPage() {
       const disp = paramsFromUrl('disposition');
       const escalated = paramsFromUrl('e') || paramsFromUrl('escalated');
       const handled = paramsFromUrl('handled');
+      const severity = paramsFromUrl('severity');
       if (status) params.status = status;
       if (disp) params.disposition = disp;
       if (escalated) params.escalated = true;
       if (handled) params.handled = true;
+      if (severity) params.severity = severity;
       const data = await alertsApi.queue(params);
       const list: Row[] = data.alerts || [];
       list.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

@@ -12,7 +12,7 @@ export default function CasesPage() {
   useEffect(() => {
     apiRequest('/cases').then(d => setRows(d.cases || [])).catch((e:any)=>{
       if (e?.status === 401) {
-        setError('Not signed in or token expired. Please sign in via Data Sources.');
+        setError('Not signed in or token expired. Please sign in.');
       } else {
         setError(e?.message || 'Failed to load');
       }
@@ -29,7 +29,7 @@ export default function CasesPage() {
         <div className="text-danger text-sm flex items-center gap-2" role="alert">
           <span>{error}</span>
           {error.toLowerCase().includes('sign in') && (
-            <button className="px-2 py-1 border border-border rounded-md" onClick={()=>navigate('/ingest')}>Go to Sign In</button>
+            <button className="px-2 py-1 border border-border rounded-md" onClick={()=>navigate('/login')}>Go to Sign In</button>
           )}
         </div>
       )}

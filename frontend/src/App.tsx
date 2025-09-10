@@ -23,16 +23,16 @@ export default function App() {
   // Load current user on app mount (keeps header/user info in sync)
   useEffect(() => { void refresh(); }, [refresh]);
 
-  // Global auth guard: redirect unauthenticated users to /ingest for protected routes
+  // Global auth guard: redirect unauthenticated users to /login for protected routes
   useEffect(() => {
     const publicPaths = new Set(['/login', '/ingest']);
     if (publicPaths.has(location.pathname)) return;
     if (!token) {
-      navigate('/ingest');
+      navigate('/login');
       return;
     }
     if (!loading && !me) {
-      navigate('/ingest');
+      navigate('/login');
     }
   }, [location.pathname, token, me, loading, navigate]);
 

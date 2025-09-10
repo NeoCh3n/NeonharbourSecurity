@@ -1,18 +1,15 @@
 import { useEffect, useState } from 'react';
-import { authApi } from '../services/api';
 import { useAuth } from '../store/auth';
-import apiRequest, { alertsApi, integrationsApi, IntegrationItem } from '../services/api';
+import apiRequest, { integrationsApi, IntegrationItem } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
 export default function IngestPage() {
-  const [email, setEmail] = useState('demo@local');
-  const [password, setPassword] = useState('demo1234');
   const [status, setStatus] = useState<string>('');
   const [busy, setBusy] = useState(false);
   const [integrations, setIntegrations] = useState<IntegrationItem[]>([]);
   const [savingIntegrations, setSavingIntegrations] = useState(false);
   const navigate = useNavigate();
-  const { me, login, register, refresh } = useAuth();
+  const { me, refresh } = useAuth();
 
   useEffect(() => {
     const t = localStorage.getItem('token');
@@ -33,37 +30,8 @@ export default function IngestPage() {
     }
   }, [me?.id]);
 
-  async function signIn() {
-    setBusy(true);
-    setStatus('Signing in...');
-    try {
-      await login(email, password);
-      setStatus('Signed in');
-      return true;
-    } catch (e:any) {
-      setStatus('Sign-in failed: ' + (e?.message || e));
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function registerUser() {
-    setBusy(true);
-    setStatus('Registering...');
-    try {
-      await register(email, password);
-      setStatus('Registered (token issued). You can now sign in.');
-    } catch (e:any) {
-      setStatus('Register failed: ' + (e?.message || e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function ingestSamples() {
-    const ok = !!localStorage.getItem('token') || await signIn();
-    if (!ok) return;
+    if (!localStorage.getItem('token')) { navigate('/login'); return; }
     setBusy(true);
     setStatus('Ingesting sample alerts...');
     try {
@@ -83,9 +51,8 @@ export default function IngestPage() {
   }
 
   async function viewAlerts() {
-    const ok = !!localStorage.getItem('token') || await signIn();
-    if (!ok) return;
-    navigate('/alerts-list');
+    if (localStorage.getItem('token')) navigate('/alerts-list');
+    else navigate('/login');
   }
 
   return (
@@ -101,30 +68,17 @@ export default function IngestPage() {
         </div>
       </div>
       <div className="bg-surface rounded-lg border border-border p-3 shadow-sm">
-        <div className="text-sm text-muted mb-2">In-Browser Validation</div>
-        {!me ? (
-          <>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm text-muted mb-1">Email</label>
-                <input className="w-full border border-border rounded-md px-3 py-2 bg-surface text-text" value={email} onChange={e => setEmail(e.target.value)} />
-              </div>
-              <div>
-                <label className="block text-sm text-muted mb-1">Password</label>
-                <input type="password" className="w-full border border-border rounded-md px-3 py-2 bg-surface text-text" value={password} onChange={e => setPassword(e.target.value)} />
-              </div>
-            </div>
-            <div className="mt-3 flex gap-2">
-              <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md btn-gradient" onClick={signIn}>Sign In</button>
-              <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={registerUser}>Register</button>
-              <button disabled={busy} className="px-3 py-1.5 border border-border rounded-md" onClick={viewAlerts}>View Alerts</button>
-            </div>
-          </>
-        ) : (
+        <div className="text-sm text-muted mb-2">Data validation helpers</div>
+        {me ? (
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted">Signed in as</span> <span className="px-2 py-0.5 rounded bg-surfaceAlt border border-border">{me.email}</span>
-            <button className="ml-2 px-3 py-1.5 border border-border rounded-md" onClick={ingestSamples}>Ingest Samples</button>
+            <button className="ml-2 px-3 py-1.5 border border-border rounded-md" onClick={ingestSamples} disabled={busy}>Ingest Samples</button>
             <button className="px-3 py-1.5 border border-border rounded-md" onClick={viewAlerts}>View Alerts</button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted">Not signed in</span>
+            <button className="px-3 py-1.5 border border-border rounded-md" onClick={()=>navigate('/login')}>Go to Sign In</button>
           </div>
         )}
         <div className="text-sm text-muted mt-2">{status}</div>
@@ -135,8 +89,7 @@ export default function IngestPage() {
         <IntegrationsEditor items={integrations} onChange={setIntegrations} />
         <div className="mt-3">
           <button disabled={savingIntegrations} className="px-3 py-1.5 border border-border rounded-md" onClick={async ()=>{
-            const ok = await ensureLogin();
-            if (!ok) { setStatus('Not signed in, cannot save'); return; }
+            if (!localStorage.getItem('token')) { setStatus('Not signed in, cannot save'); navigate('/login'); return; }
             setSavingIntegrations(true);
             try {
               await integrationsApi.save(integrations);
@@ -150,7 +103,7 @@ export default function IngestPage() {
         </div>
       </div>
       <div className="bg-surface rounded-lg border border-border p-3 text-sm text-muted">
-        Validation steps: 1) Sign in to obtain token 2) Ingest sample alerts (Splunk/Defender/Email) 3) View list and detail. Backend enables normalization, semantic unification, casing, and AI timeline.
+        Validation steps: 1) Sign in via Login 2) Ingest sample alerts (Splunk/Defender/Email) 3) View list and detail. Backend enables normalization, semantic unification, casing, and AI timeline.
       </div>
     </div>
   );

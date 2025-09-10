@@ -155,7 +155,7 @@ export default function DashboardPage() {
 
       {unauthorized && (
         <div role="alert" className="bg-surface rounded-lg border border-border p-3 text-sm">
-          Not signed in or token expired. Please sign in via Menu → Data Sources.
+          Not signed in or token expired. Please sign in.
         </div>
       )}
 

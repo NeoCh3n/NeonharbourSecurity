@@ -69,10 +69,10 @@ export function UserMenu() {
             <>
               <div className="px-2 py-1">
                 <div className="text-sm font-medium">Not signed in</div>
-                <div className="text-xs text-muted">Please sign in via Data Sources.</div>
+                <div className="text-xs text-muted">Please sign in.</div>
               </div>
               <div className="my-2 h-px bg-border" />
-              <button className="w-full px-3 py-1.5 text-left rounded-md hover:bg-surfaceAlt text-sm" onClick={() => { navigate('/ingest'); setOpen(false); }}>Go to Sign In</button>
+              <button className="w-full px-3 py-1.5 text-left rounded-md hover:bg-surfaceAlt text-sm" onClick={() => { navigate('/login'); setOpen(false); }}>Go to Sign In</button>
             </>
           )}
         </div>

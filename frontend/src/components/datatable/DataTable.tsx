@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import {
   ColumnDef,
   flexRender,
@@ -17,6 +17,7 @@ export interface DataTableProps<T> {
 
 export function DataTable<T extends { id?: string | number }>({ columns, data, height = 520 }: DataTableProps<T>) {
   const density = useUI(s => s.tableDensity);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const table = useReactTable({
     data,
@@ -27,8 +28,10 @@ export function DataTable<T extends { id?: string | number }>({ columns, data, h
 
   const rowVirtualizer = useVirtualizer({
     count: table.getRowModel().rows.length,
-    getScrollElement: () => document.getElementById('vt-scroll'),
-    estimateSize: () => (density === 'compact' ? 28 : density === 'cozy' ? 40 : 36)
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => (density === 'compact' ? 28 : density === 'cozy' ? 40 : 36),
+    measureElement: (el) => (el as HTMLElement).getBoundingClientRect().height,
+    overscan: 8,
   });
 
   const totalSize = rowVirtualizer.getTotalSize();
@@ -50,7 +53,7 @@ export function DataTable<T extends { id?: string | number }>({ columns, data, h
 
   return (
     <div className="bg-surface rounded-lg border border-border overflow-hidden">
-      <div id="vt-scroll" style={{ height, overflow: 'auto' }}>
+      <div ref={scrollRef} style={{ height, overflow: 'auto' }}>
         <table className="w-full">
           {thead}
           <tbody style={{ position: 'relative' }}>
@@ -60,7 +63,12 @@ export function DataTable<T extends { id?: string | number }>({ columns, data, h
             {virtualRows.map(vr => {
               const row = table.getRowModel().rows[vr.index];
               return (
-                <tr key={row.id} className="border-b border-border" style={{ transform: `translateY(${vr.start}px)` }}>
+                <tr
+                  key={row.id}
+                  ref={rowVirtualizer.measureElement as any}
+                  className="border-b border-border"
+                  style={{ transform: `translateY(${vr.start}px)`, willChange: 'transform' }}
+                >
                   {row.getVisibleCells().map(cell => (
                     <td key={cell.id} className="px-3 py-2 text-sm">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}

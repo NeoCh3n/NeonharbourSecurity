@@ -8,8 +8,8 @@ export default function RespondPage({ alertIdOverride }: { alertIdOverride?: str
   const [severity, setSeverity] = useState<'Low'|'Medium'|'High'|'Critical'>('Medium');
   const [confidence, setConfidence] = useState(72);
   const [audit, setAudit] = useState<string[]>([
-    'Analyst alice 查看证据包 #123',
-    'System 关联相似案例 #77',
+    'Analyst alice viewed evidence pack #123',
+    'System linked similar case #77',
   ]);
   const [message, setMessage] = useState('');
   const [alertId, setAlertId] = useState<string>('');
@@ -18,14 +18,14 @@ export default function RespondPage({ alertIdOverride }: { alertIdOverride?: str
   async function requestAction(actionId: string) {
     try {
       // Example: require human approval – simulate via confirm()
-      const ok = window.confirm(`提交动作 ${actionId}，需审批，确认提交？`);
+      const ok = window.confirm(`Submit action "${actionId}" for approval?`);
       if (!ok) return;
       const idNum = alertId ? Number(alertId) : 0;
       const r = await actionsApi.request(idNum, actionId, 'UI requested');
-      setMessage(`已提交：${r.traceId || 'trace-xxx'}`);
-      setAudit(prev => [...prev, `请求动作 ${actionId} 已提交 (alert ${idNum || '-'})`]);
+      setMessage(`Submitted: ${r.traceId || 'trace-xxx'}`);
+      setAudit(prev => [...prev, `Action request ${actionId} submitted (alert ${idNum || '-'})`]);
     } catch {
-      setMessage('提交失败');
+      setMessage('Submit failed');
     }
   }
 
@@ -36,9 +36,9 @@ export default function RespondPage({ alertIdOverride }: { alertIdOverride?: str
     try {
       const r = await apiRequest(`/alerts/${alertId}`);
       setDetail(r);
-      setAudit(prev => [`载入告警 ${alertId} 详情`, ...prev]);
+      setAudit(prev => [`Loaded alert ${alertId} details`, ...prev]);
     } catch (e: any) {
-      setMessage(e?.message || '加载失败');
+      setMessage(e?.message || 'Load failed');
     }
   }
 
@@ -59,11 +59,11 @@ export default function RespondPage({ alertIdOverride }: { alertIdOverride?: str
                 <details>
                   <summary className="px-3 py-1.5 border border-border rounded-md cursor-pointer select-none">Actions ▾</summary>
                   <div className="absolute z-10 mt-1 bg-surface border border-border rounded-md p-2 w-[220px] shadow">
-                    <button className="block w-full text-left px-2 py-1 hover:bg-surfaceAlt rounded" onClick={()=>requestAction('isolate-endpoint')}>隔离端点</button>
-                    <button className="block w-full text-left px-2 py-1 hover:bg-surfaceAlt rounded" onClick={()=>requestAction('disable-account')}>禁用账号</button>
-                    <button className="block w-full text-left px-2 py-1 hover:bg-surfaceAlt rounded" onClick={()=>requestAction('revoke-session')}>撤销会话</button>
-                    <button className="block w-full text-left px-2 py-1 hover:bg-surfaceAlt rounded" onClick={()=>requestAction('block-ip')}>IP 封禁</button>
-                    <button className="block w-full text-left px-2 py-1 hover:bg-surfaceAlt rounded" onClick={()=>requestAction('recall-email')}>邮件召回</button>
+                    <button className="block w-full text-left px-2 py-1 hover:bg-surfaceAlt rounded" onClick={()=>requestAction('isolate-endpoint')}>Isolate endpoint</button>
+                    <button className="block w-full text-left px-2 py-1 hover:bg-surfaceAlt rounded" onClick={()=>requestAction('disable-account')}>Disable account</button>
+                    <button className="block w-full text-left px-2 py-1 hover:bg-surfaceAlt rounded" onClick={()=>requestAction('revoke-session')}>Revoke session</button>
+                    <button className="block w-full text-left px-2 py-1 hover:bg-surfaceAlt rounded" onClick={()=>requestAction('block-ip')}>Block IP</button>
+                    <button className="block w-full text-left px-2 py-1 hover:bg-surfaceAlt rounded" onClick={()=>requestAction('recall-email')}>Recall email</button>
                   </div>
                 </details>
               </div>
@@ -74,7 +74,7 @@ export default function RespondPage({ alertIdOverride }: { alertIdOverride?: str
               <label className="block text-muted text-xs">Alert ID (for action audit)</label>
               <input className="px-2 py-1 border border-border rounded-md" value={alertId} onChange={e=>setAlertId(e.target.value)} placeholder="Optional: enter alert id" />
             </div>
-            <button className="px-3 py-1.5 border border-border rounded-md" onClick={loadDetail}>载入详情</button>
+            <button className="px-3 py-1.5 border border-border rounded-md" onClick={loadDetail}>Load Details</button>
             <div className="text-xs text-muted">Note: Actions trigger /actions to create an audit record.</div>
           </div>
           <div className="grid grid-cols-3 gap-3 mt-2">

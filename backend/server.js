@@ -1510,6 +1510,25 @@ app.get('/cases/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// Update case brief (stores in context.brief)
+app.post('/cases/:id/brief', authMiddleware, async (req, res) => {
+  const caseId = parseInt(req.params.id, 10);
+  const { brief } = req.body || {};
+  if (typeof brief !== 'string') return res.status(400).json({ error: 'Invalid brief' });
+  try {
+    const r = await pool.query('SELECT context FROM cases WHERE id=$1 AND tenant_id=$2', [caseId, req.tenantId]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    let ctx = r.rows[0].context || {};
+    if (typeof ctx !== 'object') { ctx = {}; }
+    ctx.brief = brief.slice(0, 2000);
+    await pool.query('UPDATE cases SET context=$1 WHERE id=$2 AND tenant_id=$3', [ctx, caseId, req.tenantId]);
+    res.json({ success: true, brief: ctx.brief });
+  } catch (e) {
+    console.error('Error updating case brief:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Create a new case (optionally linking an existing alert and saving an initial finding as memory)
 app.post('/cases', authMiddleware, async (req, res) => {
   const { severity = 'medium', status = 'open', owner = null, context = {}, alertId = null, finding = null, title = null } = req.body || {};

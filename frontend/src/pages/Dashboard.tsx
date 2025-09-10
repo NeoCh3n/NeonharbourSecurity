@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChartFrame, ChartSkeleton, downsample } from '../components/charts/ChartFrame';
 import { AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -7,14 +7,22 @@ import { DataTable } from '../components/datatable/DataTable';
 import { useUI } from '../store/ui';
 import { useNavigate } from 'react-router-dom';
 import { alertsApi, metricsApi } from '../services/api';
+import apiRequest from '../services/api';
+import { useAuth } from '../store/auth';
 
 type TrendPoint = { day: string; alerts: number };
 
 export default function DashboardPage() {
+  const { me } = useAuth();
   const setRight = useUI(s => s.setRightPanelOpen);
   const [rangeDays, setRangeDays] = useState<number>(30);
   const [sev, setSev] = useState<'all'|'critical'|'high'|'medium'|'low'>('all');
   const navigate = useNavigate();
+  const [opBusy, setOpBusy] = useState(false);
+  const [opMsg, setOpMsg] = useState('');
+  const [opMode, setOpMode] = useState<'triage'|'close_low_benign'>('triage');
+  const [autoRun, setAutoRun] = useState(false);
+  const [autoEverySec] = useState(300); // 5 min
 
   const metricsQ = useQuery({
     queryKey: ['metrics'],
@@ -25,6 +33,30 @@ export default function DashboardPage() {
     queryKey: ['alerts-for-trend'],
     queryFn: async () => alertsApi.list(),
   });
+
+  async function runAutoTriage() {
+    setOpBusy(true);
+    setOpMsg('');
+    try {
+      const r = await apiRequest('/alerts/auto-triage', { method: 'POST', body: JSON.stringify({ limit: 500, mode: opMode }) });
+      if ((r as any)?.success) {
+        setOpMsg(`Auto-triage (${opMode}) updated ${r.updated}${r.closed!=null?`, closed ${r.closed}`:''}`);
+        await Promise.allSettled([metricsQ.refetch(), alertsQ.refetch()]);
+      } else {
+        setOpMsg('Auto-triage failed');
+      }
+    } catch (e:any) {
+      setOpMsg(e?.message || 'Auto-triage failed');
+    } finally {
+      setOpBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!autoRun) return;
+    const t = setInterval(() => { void runAutoTriage(); }, autoEverySec * 1000);
+    return () => clearInterval(t);
+  }, [autoRun, opMode, autoEverySec]);
 
   const unauthorized = (metricsQ.error as any)?.status === 401 || (alertsQ.error as any)?.status === 401;
 
@@ -192,6 +224,24 @@ export default function DashboardPage() {
           spark={buildSpark(alertsQ.data?.alerts || [], rangeDays, sev, { mode: 'uncertain' })}
         />
       </section>
+
+      {me?.isAdmin && (
+        <section className="bg-surface rounded-lg border border-border p-3 flex items-center gap-2">
+          <div className="font-semibold mr-2">Operations</div>
+          <label className="flex items-center gap-2 text-sm">
+            <span>Action</span>
+            <select className="px-2 py-1 border border-border rounded" value={opMode} onChange={e=>setOpMode(e.target.value as any)}>
+              <option value="triage">Refresh statuses</option>
+              <option value="close_low_benign">Force-close low benign</option>
+            </select>
+          </label>
+          <button className="px-2 py-1 border border-border rounded" onClick={runAutoTriage} disabled={opBusy}>{opBusy ? 'Running…' : 'Run Now'}</button>
+          <label className="flex items-center gap-2 text-sm ml-4">
+            <input type="checkbox" checked={autoRun} onChange={e=>setAutoRun(e.target.checked)} /> Auto every 5 min
+          </label>
+          {opMsg && <div className="text-xs text-muted ml-2" aria-live="polite">{opMsg}</div>}
+        </section>
+      )}
 
       {/* 2x2 layout for core insights */}
       <section className="grid grid-cols-12 gap-3">

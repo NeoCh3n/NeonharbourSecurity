@@ -630,12 +630,14 @@ app.get('/alerts/:id', authMiddleware, async (req, res) => {
 // Bulk re-triage open alerts using current rules (admin only)
 app.post('/alerts/auto-triage', authMiddleware, requireAdmin, async (req, res) => {
   const limit = Math.min(1000, parseInt(String(req.body?.limit || '200'), 10) || 200);
+  const mode = String(req.body?.mode || 'triage').toLowerCase(); // triage | close_low_benign
   try {
     const r = await pool.query(
       "SELECT id, raw, severity, category, action, entities, mitre FROM alerts WHERE tenant_id=$1 AND COALESCE(status,'') NOT IN ('resolved','closed') ORDER BY id DESC LIMIT $2",
       [req.tenantId, limit]
     );
     let updated = 0;
+    let closed = 0;
     for (const row of r.rows) {
       try {
         const raw = typeof row.raw === 'object' ? row.raw : (row.raw ? JSON.parse(row.raw) : {});
@@ -643,7 +645,24 @@ app.post('/alerts/auto-triage', authMiddleware, requireAdmin, async (req, res) =
         const unified = toUnifiedAlert(raw || {});
         const analysis = { severity: row.severity || unified.severity || 'low', evidence: [] };
         const mitreObj = typeof row.mitre === 'object' ? row.mitre : (row.mitre ? JSON.parse(row.mitre) : null);
-        const triage = await decideAutoTriage(unified, analysis, mitreObj);
+        let triage;
+        if (mode === 'close_low_benign') {
+          const { getTriageConfig } = require('./config/triage');
+          const cfg = await getTriageConfig();
+          const sev = String(analysis.severity || unified.severity || 'low').toLowerCase();
+          const action = String(unified?.action || '').toLowerCase();
+          const category = String(unified?.category || '').toLowerCase();
+          const isLow = (cfg.lowSeverity || ['low']).includes(sev);
+          const benignActions = new Set(cfg.benignActions || []);
+          const benignCategories = new Set(cfg.benignCategories || []);
+          if (isLow && (benignActions.has(action) || benignCategories.has(category))) {
+            triage = { disposition: 'false_positive', status: 'resolved', priority: 'low', needEscalate: false, reason: 'Force-close low benign (bulk)' };
+          } else {
+            triage = await decideAutoTriage(unified, analysis, mitreObj);
+          }
+        } else {
+          triage = await decideAutoTriage(unified, analysis, mitreObj);
+        }
         const setResolveTime = (triage.status === 'closed' || triage.status === 'resolved');
         await pool.query(
           setResolveTime
@@ -652,9 +671,10 @@ app.post('/alerts/auto-triage', authMiddleware, requireAdmin, async (req, res) =
           [triage.status, triage.priority, triage.disposition, triage.needEscalate, triage.reason, row.id, req.tenantId]
         );
         updated++;
+        if (setResolveTime) closed++;
       } catch {}
     }
-    res.json({ success: true, updated });
+    res.json({ success: true, updated, closed, mode });
   } catch (e) {
     console.error('Auto-triage bulk error:', e);
     res.status(500).json({ error: 'Internal server error' });

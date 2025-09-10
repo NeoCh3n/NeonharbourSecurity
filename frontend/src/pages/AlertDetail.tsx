@@ -11,6 +11,8 @@ export default function AlertDetailPage() {
   const [error, setError] = useState<string>('');
   const [actionMsg, setActionMsg] = useState<string>('');
   const [pendingAction, setPendingAction] = useState<string>('');
+  const [reanalyzeBusy, setReanalyzeBusy] = useState(false);
+  const [reanalyzeMsg, setReanalyzeMsg] = useState('');
   const mitre = detail?.mitre || null;
 
   async function loadAll() {
@@ -32,6 +34,26 @@ export default function AlertDetailPage() {
   }
 
   useEffect(() => { void loadAll(); }, [id]);
+
+  async function reanalyze() {
+    if (!id) return;
+    setReanalyzeBusy(true);
+    setReanalyzeMsg('');
+    try {
+      const r = await apiRequest(`/alerts/${id}/reanalyze`, { method: 'POST' });
+      if (r?.success) {
+        await loadAll();
+        setReanalyzeMsg('Re-analysis completed');
+        setTimeout(()=>setReanalyzeMsg(''), 2500);
+      } else {
+        setReanalyzeMsg('Re-analysis failed');
+      }
+    } catch (e:any) {
+      setReanalyzeMsg(e?.message || 'Re-analysis failed');
+    } finally {
+      setReanalyzeBusy(false);
+    }
+  }
 
   async function toggleStep(stepId: string, done: boolean) {
     if (!id) return;
@@ -105,8 +127,14 @@ export default function AlertDetailPage() {
         <div className="grid grid-cols-12 gap-3">
           <div className="col-span-12 lg:col-span-8 space-y-3">
             <section className="bg-surface rounded-lg border border-border p-3">
-              <div className="font-semibold mb-1">Summary</div>
-              <div className="text-sm text-muted">{detail.summary || '—'}</div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="font-semibold">Summary</div>
+                <div className="flex items-center gap-2">
+                  <button className="px-2 py-1 border border-border rounded-md" onClick={reanalyze} disabled={reanalyzeBusy}>{reanalyzeBusy ? 'Re-analyzing…' : 'Re-run Analysis'}</button>
+                  {reanalyzeMsg && <div className="text-xs text-muted">{reanalyzeMsg}</div>}
+                </div>
+              </div>
+              <div className="text-sm text-muted whitespace-pre-wrap">{detail.summary || '—'}</div>
             </section>
 
             <section className="bg-surface rounded-lg border border-border p-3">

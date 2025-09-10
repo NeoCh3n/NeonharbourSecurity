@@ -61,6 +61,19 @@ function generateRecommendations(unified) {
   if (unified?.src?.ip) recs.push({ id: 'block_ip', title: `Block source IP ${unified.src.ip}`, risk: 'low' });
   if (unified?.principal?.user) recs.push({ id: 'disable_account', title: `Temporarily disable user ${unified.principal.user}`, risk: 'medium' });
   if (unified?.asset?.host) recs.push({ id: 'isolate_endpoint', title: `Isolate endpoint ${unified.asset.host}`, risk: 'high' });
+
+  // Heuristics based on entities (covers email normalizer)
+  const entities = Array.isArray(unified?.entities) ? unified.entities : [];
+  const ipEnt = entities.find(e => String(e.type||'').toLowerCase() === 'ip');
+  const urlEnt = entities.find(e => String(e.type||'').toLowerCase() === 'url');
+  const emailEnt = entities.find(e => String(e.type||'').toLowerCase() === 'email');
+  if (!unified?.src?.ip && ipEnt?.value) recs.push({ id: 'block_ip', title: `Block source IP ${ipEnt.value}`, risk: 'low' });
+  // For email alerts with suspicious URL or sender, propose recall
+  const isEmail = (String(unified?.source||'').toLowerCase() === 'email') || (String(unified?.category||'').toLowerCase() === 'email');
+  if (isEmail && (urlEnt || unified?.principal?.email || emailEnt)) {
+    const target = emailEnt?.value || 'affected recipients';
+    recs.push({ id: 'email_recall', title: `Recall suspicious email for ${target}`, risk: 'medium' });
+  }
   if (sev === 'high' || sev === 'critical') recs.push({ id: 'force_password_reset', title: 'Force password reset for affected users', risk: 'medium' });
   return recs;
 }

@@ -24,6 +24,20 @@ async function callModel(messages, opts = {}) {
       return resp.data.choices[0].message.content.trim();
     };
 
+    // Optional fallback to DeepSeek if local provider is unreachable
+    async function postChatDeepseekFallback() {
+      const key = process.env.DEEPSEEK_API_KEY || '';
+      const base = (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1').replace(/\/$/, '');
+      const mdl = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+      if (!key) throw new Error('DeepSeek API key not configured');
+      const resp = await axios.post(
+        `${base}/chat/completions`,
+        { model: mdl, messages, temperature: 0.1, max_tokens: maxTokens },
+        { headers: { Authorization: `Bearer ${key}` }, timeout: timeoutMs }
+      );
+      return resp.data.choices[0].message.content.trim();
+    }
+
     // Primary attempt with configured base
     try {
       return await withRetry(() => postChat(baseUrl), {
@@ -48,8 +62,23 @@ async function callModel(messages, opts = {}) {
               shouldRetry: (err, info) => ['timeout', 'network', 'rate_limit', 'server_error'].includes(info.class),
             });
           } catch (altErr) {
-            throw altErr;
+            // continue to next fallback
           }
+        }
+      }
+      // If local provider failed (network/server issues), and DeepSeek is configured, try DeepSeek as a last resort
+      if (isLocal && ['timeout', 'network', 'server_error'].includes(pInfo.class)) {
+        try {
+          const out = await withRetry(() => postChatDeepseekFallback(), {
+            retries: 2,
+            base: 400,
+            factor: 2,
+            shouldRetry: (err, info) => ['timeout', 'network', 'rate_limit', 'server_error'].includes(info.class),
+          });
+          console.warn('Local LLM unreachable; used DeepSeek fallback for this request.');
+          return out;
+        } catch (fallbackErr) {
+          // fall through to throw original
         }
       }
       throw primaryErr;

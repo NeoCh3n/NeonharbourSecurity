@@ -581,6 +581,52 @@ app.get('/alerts/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// Re-run AI analysis on an alert with current provider settings
+app.post('/alerts/:id/reanalyze', authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const r = await pool.query('SELECT raw FROM alerts WHERE id=$1 AND tenant_id=$2', [id, req.tenantId]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const { toUnifiedAlert } = require('./normalizers');
+    const { generateRecommendations } = require('./planning/plan');
+    const raw = r.rows[0].raw;
+    const unified = toUnifiedAlert(typeof raw === 'object' ? raw : JSON.parse(raw || '{}'));
+    const analysis = await analyzeAlert(unified);
+    // Best-effort MITRE map; non-blocking
+    let mitre = null; let tactic = null; let techniqueStr = unified.technique || null;
+    try {
+      mitre = await mapMitre(unified);
+      if (mitre && Array.isArray(mitre.techniques) && mitre.techniques[0]) {
+        const t0 = mitre.techniques[0];
+        techniqueStr = t0.id ? `${t0.id} ${t0.name||''}`.trim() : (t0.name || techniqueStr);
+      }
+      if (mitre && Array.isArray(mitre.tactics) && mitre.tactics[0]) tactic = mitre.tactics[0].id || mitre.tactics[0].name || null;
+    } catch {}
+    const recommendations = generateRecommendations(unified);
+    await pool.query(
+      'UPDATE alerts SET summary=$1, severity=$2, timeline=$3, evidence=$4, analysis_time=$5, recommendations=$6, mitre=$7, tactic=$8, technique=$9 WHERE id=$10 AND tenant_id=$11',
+      [
+        analysis.summary,
+        analysis.severity || unified.severity || 'low',
+        JSON.stringify(analysis.timeline || []),
+        JSON.stringify(analysis.evidence || []),
+        analysis.analysisTime || null,
+        JSON.stringify(recommendations || []),
+        mitre ? JSON.stringify(mitre) : null,
+        tactic || null,
+        techniqueStr || null,
+        id,
+        req.tenantId,
+      ]
+    );
+    const updated = await pool.query('SELECT * FROM alerts WHERE id=$1 AND tenant_id=$2', [id, req.tenantId]);
+    res.json({ success: true, alert: updated.rows[0] });
+  } catch (error) {
+    console.error('Error reanalyzing alert:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Investigation details endpoint per MVP API
 app.get('/alerts/:id/investigation', authMiddleware, async (req, res) => {
   const id = parseInt(req.params.id, 10);

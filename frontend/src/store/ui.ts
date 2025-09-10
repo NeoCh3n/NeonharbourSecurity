@@ -9,6 +9,8 @@ interface UIState {
   setRightPanelOpen: (v: boolean) => void;
   tableDensity: Density;
   setTableDensity: (d: Density) => void;
+  setupOpen: boolean;
+  toggleSetup: () => void;
 }
 
 export const useUI = create<UIState>((set) => ({
@@ -20,6 +22,7 @@ export const useUI = create<UIState>((set) => ({
   setTableDensity: (d) => {
     localStorage.setItem('tableDensity', d);
     set({ tableDensity: d });
-  }
+  },
+  setupOpen: localStorage.getItem('sidebarSetupOpen') === 'false' ? false : true,
+  toggleSetup: () => set((s) => { const v = !s.setupOpen; localStorage.setItem('sidebarSetupOpen', String(v)); return { setupOpen: v }; })
 }));
-

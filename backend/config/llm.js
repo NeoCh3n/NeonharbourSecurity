@@ -3,7 +3,9 @@ const { getSetting } = require('./settings');
 async function getLLMConfig() {
   // Single toggle determines provider; defaults to env if not set
   const s = await getSetting('llm_provider', null);
-  const provider = (s && typeof s.provider === 'string') ? s.provider : (process.env.AI_PROVIDER || 'deepseek');
+  // Support legacy values where the stored setting was a plain string
+  const settingProvider = (typeof s === 'string') ? s : (s && typeof s.provider === 'string' ? s.provider : null);
+  const provider = (settingProvider || process.env.AI_PROVIDER || 'deepseek').toLowerCase();
   if (provider === 'local') {
     return {
       provider: 'local',
@@ -22,4 +24,3 @@ async function getLLMConfig() {
 }
 
 module.exports = { getLLMConfig };
-

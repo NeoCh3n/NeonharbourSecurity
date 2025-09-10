@@ -11,6 +11,9 @@ async function callModel(messages, opts = {}) {
   const timeoutMs = typeof opts.timeoutMs === 'number' ? Math.max(2000, Math.min(60000, opts.timeoutMs)) : 30000;
 
   try {
+    if (cfg.provider === 'deepseek' && !cfg.apiKey) {
+      throw new Error('DeepSeek API key not configured');
+    }
     const headers = cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {};
     const postChat = async (base) => {
       const resp = await axios.post(
@@ -53,7 +56,8 @@ async function callModel(messages, opts = {}) {
     }
   } catch (err) {
     const info = classifyError(err);
-    console.error(`DeepSeek API call failed [${info.class}]:`, err.message);
+    const baseForLog = (baseUrl || '').replace(/\?(.*)$/, '');
+    console.error(`AI call failed [${info.class}] provider=${cfg.provider} base=${baseForLog}:`, err.message);
     throw new Error(`AI service unavailable: ${err.message}`);
   }
 }

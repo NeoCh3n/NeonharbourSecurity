@@ -813,7 +813,9 @@ function requireAdmin(req, res, next) {
 app.get('/admin/settings/llm', authMiddleware, requireAdmin, async (req, res) => {
   try {
     const v = await getSetting('llm_provider', { provider: process.env.AI_PROVIDER || 'deepseek' });
-    res.json(v);
+    // Normalize legacy string values to an object shape for the UI
+    const obj = (typeof v === 'string') ? { provider: v } : v;
+    res.json(obj);
   } catch (e) {
     console.error('Error reading LLM setting:', e);
     res.status(500).json({ error: 'Internal server error' });
@@ -1289,37 +1291,33 @@ app.get('/health', (req, res) => {
 });
 
 // Detailed health for local testing (no secrets exposed)
-app.get('/health/details', (req, res) => {
-  const provider = (process.env.AI_PROVIDER || 'deepseek').toLowerCase();
-  const dsKey = !!process.env.DEEPSEEK_API_KEY;
-  const dsBase = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1';
-  const dsModel = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
-  const localBase = process.env.LOCAL_LLM_BASE_URL || 'http://127.0.0.1:1234/v1';
-  const localModel = process.env.LOCAL_LLM_MODEL || 'zysec-ai_-_securityllm';
-  const vtFlag = (process.env.USE_VIRUSTOTAL || '').toLowerCase();
-  const vtEnabled = (vtFlag === '1' || vtFlag === 'true' || vtFlag === 'yes') && !!process.env.VIRUSTOTAL_API_KEY;
-  let baseOrigin = dsBase;
-  try { const u = new URL(dsBase); baseOrigin = `${u.protocol}//${u.host}` } catch {}
+app.get('/health/details', async (req, res) => {
+  try {
+    const { getLLMConfig } = require('./config/llm');
+    const cfg = await getLLMConfig();
+    const vtFlag = (process.env.USE_VIRUSTOTAL || '').toLowerCase();
+    const vtEnabled = (vtFlag === '1' || vtFlag === 'true' || vtFlag === 'yes') && !!process.env.VIRUSTOTAL_API_KEY;
+    let baseOrigin = cfg.baseUrl;
+    try { const u = new URL(cfg.baseUrl); baseOrigin = `${u.protocol}//${u.host}` } catch {}
 
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    ai: provider === 'local' ? {
-      provider: 'local',
-      configured: true,
-      base: localBase,
-      model: localModel,
-    } : {
-      provider: 'deepseek',
-      configured: dsKey,
-      base: baseOrigin,
-      model: dsModel,
-    },
-    virustotal: {
-      enabled: vtEnabled,
-      configured: !!process.env.VIRUSTOTAL_API_KEY,
-    }
-  });
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      ai: {
+        provider: cfg.provider,
+        configured: cfg.provider === 'deepseek' ? !!cfg.apiKey : true,
+        base: baseOrigin,
+        model: cfg.model,
+      },
+      virustotal: {
+        enabled: vtEnabled,
+        configured: !!process.env.VIRUSTOTAL_API_KEY,
+      }
+    });
+  } catch (e) {
+    console.error('Health details error:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 const port = process.env.PORT || 3000;

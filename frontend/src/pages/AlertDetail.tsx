@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import apiRequest, { actionsApi, planApi } from '../services/api';
 
 export default function AlertDetailPage() {
@@ -13,6 +13,7 @@ export default function AlertDetailPage() {
   const [pendingAction, setPendingAction] = useState<string>('');
   const [reanalyzeBusy, setReanalyzeBusy] = useState(false);
   const [reanalyzeMsg, setReanalyzeMsg] = useState('');
+  const [autoTried, setAutoTried] = useState(false);
   const mitre = detail?.mitre || null;
 
   async function loadAll() {
@@ -26,6 +27,12 @@ export default function AlertDetailPage() {
       ]);
       setDetail(d);
       setPlan(p);
+      // Auto re-run analysis if previous attempt failed or summary missing (only once)
+      const summaryText = String(d?.summary || '');
+      if (!autoTried && (/^analysis failed/i.test(summaryText) || summaryText.trim().length === 0)) {
+        setAutoTried(true);
+        try { await reanalyze(); } catch {}
+      }
     } catch (e: any) {
       setError(e?.message || '加载失败');
     } finally {
@@ -103,8 +110,8 @@ export default function AlertDetailPage() {
           ))}
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <a className="px-3 py-1.5 border border-border rounded-md btn-gradient" href={`/alert-workspace?alertId=${id}&tab=investigate`}>Start Investigate</a>
-          <a className="px-3 py-1.5 border border-border rounded-md" href={`/alert-workspace?alertId=${id}`}>Open Workspace</a>
+          <Link className="px-3 py-1.5 border border-border rounded-md btn-gradient" to={`/alert-workspace?alertId=${id}&tab=investigate`}>Start Investigate</Link>
+          <Link className="px-3 py-1.5 border border-border rounded-md" to={`/alert-workspace?alertId=${id}`}>Open Workspace</Link>
         </div>
       </div>
 

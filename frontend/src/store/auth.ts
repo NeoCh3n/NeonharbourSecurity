@@ -26,7 +26,8 @@ type AuthState = {
 export const useAuth = create<AuthState>((set, get) => ({
   token: localStorage.getItem('token'),
   me: null,
-  loading: false,
+  // If a token exists on boot, start in loading=true so guards don't redirect prematurely
+  loading: !!localStorage.getItem('token'),
   error: null,
   setToken: (t) => {
     if (t) localStorage.setItem('token', t);
@@ -74,4 +75,3 @@ export const useAuth = create<AuthState>((set, get) => ({
     set({ me: null });
   }
 }));
-

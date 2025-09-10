@@ -34,9 +34,9 @@ export default function AlertWorkspacePage() {
     <div className="space-y-3">
       <section className="bg-surface rounded-lg border border-border p-3 shadow-sm flex flex-wrap items-end gap-2">
         <div>
-          <label className="block text-xs text-muted">选择告警</label>
+          <label className="block text-xs text-muted">Select Alert</label>
           <select className="px-2 py-1.5 border border-border rounded-md min-w-[260px]" value={alertId} onChange={e=>setAlertId(e.target.value)}>
-            <option value="">— 选择 —</option>
+            <option value="">— Select —</option>
             {alerts.map(a => (<option key={a.id} value={a.id}>{a.id} · {a.source} · {new Date(a.createdAt).toLocaleString()}</option>))}
           </select>
         </div>
@@ -50,7 +50,7 @@ export default function AlertWorkspacePage() {
       </section>
 
       {!alertId && (
-        <div className="bg-surface rounded-lg border border-border p-6 text-sm text-muted">请选择一条告警以开始（Plan / Investigate / Respond / Report / Hunt）。</div>
+        <div className="bg-surface rounded-lg border border-border p-6 text-sm text-muted">Please select an alert to start (Plan / Investigate / Respond / Report / Hunt).</div>
       )}
 
       {alertId && (
@@ -65,4 +65,3 @@ export default function AlertWorkspacePage() {
     </div>
   );
 }
-

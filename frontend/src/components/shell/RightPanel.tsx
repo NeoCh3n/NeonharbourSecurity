@@ -34,8 +34,8 @@ export function RightPanel() {
         <section>
           <div className="text-muted mb-1">Audit Log</div>
           <ul className="space-y-1 text-xs">
-            <li>• 查询 KQL: signins | where user == alice</li>
-            <li>• 操作预览: 禁用账号 (未提交)</li>
+          <li>• Query (KQL): signins | where user == alice</li>
+          <li>• Action preview: disable account (not submitted)</li>
           </ul>
         </section>
       </div>

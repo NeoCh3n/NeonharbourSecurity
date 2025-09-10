@@ -34,7 +34,7 @@ export default function AlertDetailPage() {
         try { await reanalyze(); } catch {}
       }
     } catch (e: any) {
-      setError(e?.message || '加载失败');
+      setError(e?.message || 'Load failed');
     } finally {
       setLoading(false);
     }
@@ -68,7 +68,7 @@ export default function AlertDetailPage() {
       const r = await planApi.update(Number(id), { stepId, done });
       setPlan({ ...(plan || {}), ...r });
     } catch (e: any) {
-      setError(e?.message || '更新计划失败');
+      setError(e?.message || 'Update plan failed');
     }
   }
 
@@ -77,12 +77,12 @@ export default function AlertDetailPage() {
     setActionMsg('');
     setPendingAction(actionId);
     try {
-      const ok = window.confirm(`提交动作 ${actionId}，需审批，确认提交？`);
+      const ok = window.confirm(`Submit action "${actionId}" for approval?`);
       if (!ok) { setPendingAction(''); return; }
       const r = await actionsApi.request(Number(id), actionId, 'Alert detail requested');
-      setActionMsg(`已提交：${r.traceId}`);
+      setActionMsg(`Submitted: ${r.traceId}`);
     } catch (e: any) {
-      setActionMsg('提交失败');
+      setActionMsg('Submit failed');
     } finally {
       setPendingAction('');
     }
@@ -170,12 +170,12 @@ export default function AlertDetailPage() {
                   {detail.timeline.map((t:any,i:number)=>(
                     <li key={i} className="flex items-start gap-2">
                       <div className="text-xs text-muted mt-0.5">{t.time || '-'}</div>
-                      <div>{t.step || t.action || '事件'} – {t.evidence || ''}</div>
+                      <div>{t.step || t.action || 'Event'} – {t.evidence || ''}</div>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <div className="text-sm text-muted">暂无</div>
+                <div className="text-sm text-muted">None</div>
               )}
             </section>
 
@@ -200,13 +200,13 @@ export default function AlertDetailPage() {
                       {plan.plan.decision.rationale && <div className="text-xs text-muted mt-1">{plan.plan.decision.rationale}</div>}
                     </div>
                   )}
-                  <div className="text-sm text-muted">步骤 / Steps</div>
+                  <div className="text-sm text-muted">Steps</div>
                   <ul>
                     {(plan.plan?.steps || []).map((s: any) => (
                       <li key={s.id} className="flex items-center gap-2 py-1 text-sm">
                         <input type="checkbox" checked={!!s.done} onChange={(e) => toggleStep(s.id, e.target.checked)} />
                         <span>{s.title}</span>
-                        {s.required && <span className="text-xs text-warning">(必选)</span>}
+                        {s.required && <span className="text-xs text-warning">(required)</span>}
                       </li>
                     ))}
                   </ul>
@@ -217,7 +217,7 @@ export default function AlertDetailPage() {
                   </div>
                 </div>
               ) : (
-                <div className="mt-2 text-sm text-muted">未加载计划</div>
+                <div className="mt-2 text-sm text-muted">Plan not loaded</div>
               )}
             </section>
           </div>

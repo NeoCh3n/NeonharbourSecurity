@@ -48,7 +48,7 @@ export default function PlanPage({ alertIdOverride }: { alertIdOverride?: string
       setDetail(d);
       setPlan(p);
     } catch (e: any) {
-      setError(e?.message || '加载失败');
+      setError(e?.message || 'Load failed');
     } finally {
       setLoading(false);
     }
@@ -60,7 +60,7 @@ export default function PlanPage({ alertIdOverride }: { alertIdOverride?: string
       const r = await planApi.update(Number(alertId), { stepId, done });
       setPlan({ ...(plan || {}), ...r });
     } catch (e: any) {
-      setError(e?.message || '更新计划失败');
+      setError(e?.message || 'Update plan failed');
     }
   }
 

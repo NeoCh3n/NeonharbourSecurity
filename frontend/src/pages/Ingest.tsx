@@ -142,14 +142,14 @@ function IntegrationsEditor({ items, onChange }: { items: IntegrationItem[]; onC
             <div className="flex items-center justify-between">
               <div className="font-medium">{p.label}</div>
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={!!it.enabled} onChange={e=>set({ ...it, enabled: e.target.checked })} /> 启用
+                <input type="checkbox" checked={!!it.enabled} onChange={e=>set({ ...it, enabled: e.target.checked })} /> Enable
               </label>
             </div>
             <div className="mt-2 grid grid-cols-1 gap-2 text-sm">
-              <input className="px-2 py-1 border border-border rounded-md bg-surface" placeholder="Endpoint / URL (可选)" value={it.settings?.url || ''} onChange={e=>set({ ...it, settings: { ...(it.settings||{}), url: e.target.value } })} />
-              <input className="px-2 py-1 border border-border rounded-md bg-surface" placeholder="Token / Key (可选)" value={it.settings?.token || ''} onChange={e=>set({ ...it, settings: { ...(it.settings||{}), token: e.target.value } })} />
+              <input className="px-2 py-1 border border-border rounded-md bg-surface" placeholder="Endpoint / URL (optional)" value={it.settings?.url || ''} onChange={e=>set({ ...it, settings: { ...(it.settings||{}), url: e.target.value } })} />
+              <input className="px-2 py-1 border border-border rounded-md bg-surface" placeholder="Token / Key (optional)" value={it.settings?.token || ''} onChange={e=>set({ ...it, settings: { ...(it.settings||{}), token: e.target.value } })} />
             </div>
-            <div className="text-xs text-muted mt-2">仅保存只读接入所需的最小配置；敏感信息请使用密钥管理服务。</div>
+            <div className="text-xs text-muted mt-2">Only save the minimum config needed for read-only access; use a secrets manager for sensitive data.</div>
           </div>
         );
       })}

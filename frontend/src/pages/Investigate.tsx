@@ -35,7 +35,7 @@ export default function InvestigatePage({ alertIdOverride }: { alertIdOverride?:
         const r = await apiRequest(`/alerts/${alertId}/investigation`);
         const tl: Event[] = Array.isArray(r.timeline) ? r.timeline.map((t: any, i: number) => ({
           ts: t.time || new Date(Date.now() - (i+1) * 5 * 60_000).toISOString(),
-          text: `${t.step || t.action || '事件'} - ${t.evidence || ''}`,
+          text: `${t.step || t.action || 'Event'} - ${t.evidence || ''}`,
           sev: (i === 0 ? 'Low' : i === 1 ? 'Medium' : 'High')
         })) : [];
         if (tl.length) setTimeline(tl);
@@ -88,7 +88,7 @@ export default function InvestigatePage({ alertIdOverride }: { alertIdOverride?:
         Investigate: Left timeline, center Q&A with summary, right charts/table. Use “Dig Deeper” to add context-aware questions.
       </div>
       <div className="col-span-12 lg:col-span-3 bg-surface rounded-lg border border-border p-3">
-        <div className="font-semibold mb-2">时间线</div>
+        <div className="font-semibold mb-2">Timeline</div>
         <ul className="text-sm space-y-2">
           {timeline.map((e, i) => (
             <li key={i} className="flex items-start gap-2">

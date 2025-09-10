@@ -42,9 +42,11 @@ app.use(cors({ origin: corsOrigin, credentials: true }));
 // Rate limiting (configurable)
 function toBool(v) { const s = String(v || '').toLowerCase(); return ['1','true','yes','on'].includes(s); }
 const GLOBAL_RATE_LIMIT_WINDOW_MS = parseInt(process.env.GLOBAL_RATE_LIMIT_WINDOW_MS || '900000', 10);
-const GLOBAL_RATE_LIMIT_MAX = parseInt(process.env.GLOBAL_RATE_LIMIT_MAX || (process.env.NODE_ENV !== 'production' ? '0' : '100'), 10);
+// Disable global rate limit by default to avoid 429 during pilots; set GLOBAL_RATE_LIMIT_MAX env to re-enable
+const GLOBAL_RATE_LIMIT_MAX = parseInt(process.env.GLOBAL_RATE_LIMIT_MAX || '0', 10);
 const AUTH_RATE_LIMIT_WINDOW_MS = parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || '900000', 10);
-const AUTH_RATE_LIMIT_MAX = parseInt(process.env.AUTH_RATE_LIMIT_MAX || (process.env.NODE_ENV !== 'production' ? '50' : '5'), 10);
+// Disable auth rate limit by default; set AUTH_RATE_LIMIT_MAX env to re-enable
+const AUTH_RATE_LIMIT_MAX = parseInt(process.env.AUTH_RATE_LIMIT_MAX || '0', 10);
 
 if (!toBool(process.env.DISABLE_GLOBAL_RATE_LIMIT) && GLOBAL_RATE_LIMIT_MAX > 0) {
   const limiter = rateLimit({

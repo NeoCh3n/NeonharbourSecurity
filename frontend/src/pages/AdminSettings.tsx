@@ -6,6 +6,9 @@ export default function AdminSettingsPage() {
   const [allowSelfRegister, setAllowSelfRegister] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [saveMsg, setSaveMsg] = useState('');
+  const [refreshBusy, setRefreshBusy] = useState(false);
+  const [refreshMsg, setRefreshMsg] = useState('');
   const [validateBusy, setValidateBusy] = useState(false);
   const [validateMsg, setValidateMsg] = useState('');
 
@@ -26,11 +29,27 @@ export default function AdminSettingsPage() {
   }
   useEffect(() => { load(); }, []);
 
+  async function onRefreshClick() {
+    setError('');
+    setRefreshMsg('');
+    setRefreshBusy(true);
+    try {
+      await load();
+      setRefreshMsg('Refreshed');
+      setTimeout(() => setRefreshMsg(''), 2500);
+    } finally {
+      setRefreshBusy(false);
+    }
+  }
+
   async function save() {
     setBusy(true);
+    setSaveMsg('');
     try {
       await apiRequest('/admin/settings/llm', { method: 'POST', body: JSON.stringify({ provider }) });
       await apiRequest('/admin/settings/register', { method: 'POST', body: JSON.stringify({ allowSelfRegister }) });
+      setSaveMsg('Saved');
+      setTimeout(() => setSaveMsg(''), 2500);
     } catch (e:any) { setError(e?.message || 'Failed to save'); } finally { setBusy(false); }
   }
 
@@ -62,9 +81,12 @@ export default function AdminSettingsPage() {
     <div className="space-y-3">
       <div className="bg-surface rounded-lg border border-border p-3 flex items-center justify-between">
         <div className="font-semibold">Admin Settings</div>
-        <button className="px-2 py-1 border border-border rounded" onClick={load} disabled={busy}>Refresh</button>
+        <div className="flex items-center gap-2">
+          {refreshMsg && <div className="text-xs text-muted" aria-live="polite">{refreshMsg}</div>}
+          <button className="px-2 py-1 border border-border rounded" onClick={onRefreshClick} disabled={refreshBusy}>{refreshBusy ? 'Refreshing...' : 'Refresh'}</button>
+        </div>
       </div>
-      {error && <div className="text-danger text-sm" role="alert">{error}</div>}
+      {error && <div className="text-danger text-sm" role="alert" aria-live="assertive">{error}</div>}
       <div className="bg-surface rounded-lg border border-border p-3 space-y-2">
         <div className="font-semibold mb-2">LLM Provider</div>
         <div className="flex items-center gap-3">
@@ -74,7 +96,8 @@ export default function AdminSettingsPage() {
           <label className="flex items-center gap-1">
             <input type="radio" name="llm" value="local" checked={provider==='local'} onChange={()=>setProvider('local')} /> Local (http://127.0.0.1:1234, model zysec-ai_-_securityllm)
           </label>
-          <button className="px-2 py-1 border border-border rounded" onClick={save} disabled={busy}>Save</button>
+          <button className="px-2 py-1 border border-border rounded" onClick={save} disabled={busy}>{busy ? 'Saving...' : 'Save'}</button>
+          {saveMsg && <div className="text-xs text-muted" aria-live="polite">{saveMsg}</div>}
         </div>
         <div className="text-xs text-muted">This is a single toggle that switches the entire backend between providers. No code changes needed.</div>
         {/* Inline validation controls (optional convenience, not persisted) */}
@@ -113,7 +136,7 @@ export default function AdminSettingsPage() {
         )}
         <div className="flex items-center gap-2 mt-2">
           <button className="px-2 py-1 border border-border rounded" onClick={validateLLM} disabled={validateBusy}>{validateBusy ? 'Validating...' : 'Validate'}</button>
-          {validateMsg && <div className="text-xs">{validateMsg}</div>}
+          {validateMsg && <div className="text-xs" aria-live="polite">{validateMsg}</div>}
         </div>
       </div>
       <div className="bg-surface rounded-lg border border-border p-3">

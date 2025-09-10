@@ -26,6 +26,7 @@ export function UserMenu() {
 
   const tenant = me?.tenants?.find(t => t.id === me?.currentTenantId);
   const authed = !!me;
+  function go(path: string) { navigate(path); setOpen(false); }
 
   return (
     <div className="relative">
@@ -61,6 +62,14 @@ export function UserMenu() {
                     )}
                   </div>
                 ))}
+              </div>
+              <div className="my-2 h-px bg-border" />
+              {/* Setup moved here from Sidebar */}
+              <div className="px-2 py-1 text-xs text-muted">Setup</div>
+              <div className="px-1 py-1 text-sm">
+                <button className="w-full px-2 py-1 text-left rounded-md hover:bg-surfaceAlt" onClick={()=>go('/ingest')}>🔌 Sources</button>
+                <button className="w-full px-2 py-1 text-left rounded-md hover:bg-surfaceAlt" onClick={()=>go('/policies')}>🛡️ Policies</button>
+                <button className="w-full px-2 py-1 text-left rounded-md hover:bg-surfaceAlt" onClick={()=>go('/admin')}>⚙️ Admin</button>
               </div>
               <div className="my-2 h-px bg-border" />
               <button className="w-full px-3 py-1.5 text-left rounded-md hover:bg-surfaceAlt text-sm" onClick={() => { logout(); navigate('/login'); }}>Sign out</button>

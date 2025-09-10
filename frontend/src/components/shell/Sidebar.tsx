@@ -54,25 +54,7 @@ export function Sidebar() {
                   ) : null
                 )}
               </NavLink>
-              {expanded && item.to === '/alerts-list' && (
-                <div className="ml-8 mt-1 mb-2 flex items-center gap-2 text-xs">
-                  <button
-                    aria-pressed={triageFilter==='all'}
-                    className={`px-2 py-0.5 rounded-md border ${triageFilter==='all' ? 'bg-primary text-primaryFg border-transparent' : 'border-border hover:bg-surfaceAlt'}`}
-                    onClick={() => navigate('/alerts-list?f=all')}
-                  >All</button>
-                  <button
-                    aria-pressed={triageFilter==='me'}
-                    className={`px-2 py-0.5 rounded-md border ${triageFilter==='me' ? 'bg-primary text-primaryFg border-transparent' : 'border-border hover:bg-surfaceAlt'}`}
-                    onClick={() => navigate('/alerts-list?f=me')}
-                  >Mine</button>
-                  <button
-                    aria-pressed={triageFilter==='unassigned'}
-                    className={`px-2 py-0.5 rounded-md border ${triageFilter==='unassigned' ? 'bg-primary text-primaryFg border-transparent' : 'border-border hover:bg-surfaceAlt'}`}
-                    onClick={() => navigate('/alerts-list?f=unassigned')}
-                  >Unassigned</button>
-                </div>
-              )}
+              {/* Triage sub-filters removed from sidebar for a cleaner nav */}
             </li>
           ))}
         </ul>

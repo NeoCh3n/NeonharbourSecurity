@@ -45,7 +45,8 @@ function genData(n = 1000): AlertRow[] {
 }
 
 export default function ThreatHunterPage() {
-  const [rows] = useState(() => genData(5000));
+  // Start with no data for new users; remove demo dataset
+  const [rows] = useState<AlertRow[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<'results' | 'plan'>('results');
   const [input, setInput] = useState('');
@@ -177,12 +178,14 @@ export default function ThreatHunterPage() {
         <select className="px-2 py-1.5 rounded-md border border-border"><option>Asset</option></select>
         <select className="px-2 py-1.5 rounded-md border border-border"><option>Tactic/Technique</option></select>
         <select className="px-2 py-1.5 rounded-md border border-border"><option>Playbook Tag</option></select>
-        <div className="ml-auto flex items-center gap-2 text-sm">
-          <span className="text-muted">Selected {selected.size}</span>
-          <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => alert('Bulk Assign')}>Assign</button>
-          <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => alert('Change Status')}>Change Status</button>
-          <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => downloadCSV(toCSV(selectedRows), 'alerts.csv')}>Export CSV</button>
-        </div>
+        {rows.length > 0 && (
+          <div className="ml-auto flex items-center gap-2 text-sm">
+            <span className="text-muted">Selected {selected.size}</span>
+            <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => alert('Bulk Assign')}>Assign</button>
+            <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => alert('Change Status')}>Change Status</button>
+            <button className="px-3 py-1.5 border border-border rounded-md" onClick={() => downloadCSV(toCSV(selectedRows), 'alerts.csv')}>Export CSV</button>
+          </div>
+        )}
       </section>
 
       <div className="bg-surface rounded-lg border border-border">
@@ -218,7 +221,13 @@ export default function ThreatHunterPage() {
               <button className="px-3 py-1.5 border border-border rounded-md btn-gradient" onClick={createCaseFromFinding} disabled={busyCase || !lastFinding}>{busyCase ? 'Working…' : 'Create Case from Latest'}</button>
               {caseMsg && <div className="text-xs text-muted">{caseMsg}</div>}
             </div>
-            <DataTable columns={columns} data={rows} height={360} />
+            {rows.length > 0 ? (
+              <DataTable columns={columns} data={rows} height={360} />
+            ) : (
+              <div className="p-4 border border-border rounded-md text-sm text-muted bg-surface">
+                No hunt results yet. Connect data sources or ingest sample alerts to see results here.
+              </div>
+            )}
           </div>
         ) : (
           <div className="p-3 space-y-2 text-sm">

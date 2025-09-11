@@ -1,10 +1,12 @@
 import { useTheme } from '../../store/theme';
 import { useUI } from '../../store/ui';
 import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-react';
+import { useNavigate } from 'react-router-dom';
 
 export function Topbar() {
   const { theme, setTheme } = useTheme();
   const toggleNav = useUI(s => s.toggleNav);
+  const navigate = useNavigate();
 
   return (
     <header className="h-topbar bg-surfaceAlt border-b border-border flex items-center justify-between px-3">
@@ -22,6 +24,16 @@ export function Topbar() {
           <option value="theme-dark">Dark</option>
           <option value="theme-hc">High Contrast</option>
         </select>
+        <SignedIn>
+          <button
+            aria-label="Open settings"
+            title="Settings"
+            className="focus-ring px-2 py-1.5 rounded-md border border-border hover:bg-surfaceAlt"
+            onClick={() => navigate('/admin')}
+          >
+            ⚙️
+          </button>
+        </SignedIn>
         <SignedOut>
           <SignInButton />
         </SignedOut>

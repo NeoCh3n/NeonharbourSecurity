@@ -1353,10 +1353,28 @@ app.post('/hunter/query', authMiddleware, async (req, res) => {
 // Metrics
 app.get('/metrics', authMiddleware, async (req, res) => {
   try {
-    const totalResult = await pool.query('SELECT COUNT(*) as total FROM alerts WHERE tenant_id = $1', [req.tenantId]);
-    const severityResult = await pool.query('SELECT severity, COUNT(*) as count FROM alerts WHERE tenant_id = $1 GROUP BY severity', [req.tenantId]);
-    const statusResult = await pool.query('SELECT status, COUNT(*) as count FROM alerts WHERE tenant_id = $1 GROUP BY status', [req.tenantId]);
-    const timeResult = await pool.query('SELECT AVG(analysis_time) as avg_time FROM alerts WHERE tenant_id = $1 AND analysis_time IS NOT NULL', [req.tenantId]);
+    // Optional filters to align dashboard and metrics
+    const rangeDays = parseInt(String(req.query.rangeDays || ''), 10);
+    const severityFilter = String(req.query.severity || '').toLowerCase();
+    const filters = [];
+    const params = [req.tenantId];
+    let idx = 2;
+    if (!Number.isNaN(rangeDays) && rangeDays > 0) {
+      filters.push(`created_at >= $${idx}`);
+      params.push(new Date(Date.now() - rangeDays * 24 * 3600 * 1000));
+      idx++;
+    }
+    if (severityFilter && severityFilter !== 'all') {
+      filters.push(`LOWER(COALESCE(severity,'')) = $${idx}`);
+      params.push(severityFilter);
+      idx++;
+    }
+    const where = filters.length ? ` AND ${filters.join(' AND ')}` : '';
+
+    const totalResult = await pool.query(`SELECT COUNT(*) as total FROM alerts WHERE tenant_id = $1${where}`, params);
+    const severityResult = await pool.query(`SELECT severity, COUNT(*) as count FROM alerts WHERE tenant_id = $1${where} GROUP BY severity`, params);
+    const statusResult = await pool.query(`SELECT status, COUNT(*) as count FROM alerts WHERE tenant_id = $1${where} GROUP BY status`, params);
+    const timeResult = await pool.query(`SELECT AVG(analysis_time) as avg_time FROM alerts WHERE tenant_id = $1${where} AND analysis_time IS NOT NULL`, params);
     const feedbackResult = await pool.query(
       `SELECT 
          SUM(CASE WHEN feedback = 'accurate' THEN 1 ELSE 0 END) as accurate,
@@ -1368,20 +1386,20 @@ app.get('/metrics', authMiddleware, async (req, res) => {
     // MTTI: avg(investigate_start - created_at); MTTR: avg(resolve_time - created_at)
     const mttiResult = await pool.query(
       `SELECT AVG(EXTRACT(EPOCH FROM (investigate_start - created_at))) as mtti_sec
-       FROM alerts WHERE tenant_id = $1 AND investigate_start IS NOT NULL`,
-      [req.tenantId]
+       FROM alerts WHERE tenant_id = $1${where} AND investigate_start IS NOT NULL`,
+      params
     );
     const mttrResult = await pool.query(
       `SELECT AVG(EXTRACT(EPOCH FROM (resolve_time - created_at))) as mttr_sec
-       FROM alerts WHERE tenant_id = $1 AND resolve_time IS NOT NULL`,
-      [req.tenantId]
+       FROM alerts WHERE tenant_id = $1${where} AND resolve_time IS NOT NULL`,
+      params
     );
     // Resolved alerts count based on resolve_time
-    const resolvedResult = await pool.query('SELECT COUNT(*) as resolved FROM alerts WHERE tenant_id = $1 AND resolve_time IS NOT NULL', [req.tenantId]);
+    const resolvedResult = await pool.query(`SELECT COUNT(*) as resolved FROM alerts WHERE tenant_id = $1${where} AND resolve_time IS NOT NULL`, params);
     // Investigated alerts count based on investigate_start
-    const investigatedResult = await pool.query('SELECT COUNT(*) as investigated FROM alerts WHERE tenant_id = $1 AND investigate_start IS NOT NULL', [req.tenantId]);
+    const investigatedResult = await pool.query(`SELECT COUNT(*) as investigated FROM alerts WHERE tenant_id = $1${where} AND investigate_start IS NOT NULL`, params);
     // Acknowledged alerts count based on ack_time
-    const acknowledgedResult = await pool.query('SELECT COUNT(*) as acknowledged FROM alerts WHERE tenant_id = $1 AND ack_time IS NOT NULL', [req.tenantId]);
+    const acknowledgedResult = await pool.query(`SELECT COUNT(*) as acknowledged FROM alerts WHERE tenant_id = $1${where} AND ack_time IS NOT NULL`, params);
     
     const severityCounts = {};
     severityResult.rows.forEach(row => {
@@ -1399,18 +1417,19 @@ app.get('/metrics', authMiddleware, async (req, res) => {
     const resolvedCount = parseInt(resolvedResult.rows[0].resolved || 0);
     const investigatedCount = parseInt(investigatedResult.rows[0].investigated || 0);
     const acknowledgedCount = parseInt(acknowledgedResult.rows[0].acknowledged || 0);
-    const backlogCount = Math.max(0, totalAlerts - resolvedCount);
+    // Handled = status IN ('resolved','closed') to avoid double counting resolve_time + status
+    const handledQuery = await pool.query(`SELECT COUNT(*)::int AS c FROM alerts WHERE tenant_id=$1${where} AND status IN ('resolved','closed')`, params);
+    const handledTotal = handledQuery.rows[0]?.c || 0;
+    const backlogCount = Math.max(0, totalAlerts - handledTotal);
 
     // New: disposition and escalation metrics
     const dispositionCounts = {};
     try {
-      const disp = await pool.query('SELECT disposition, COUNT(*)::int AS count FROM alerts WHERE tenant_id=$1 GROUP BY disposition', [req.tenantId]);
+      const disp = await pool.query(`SELECT disposition, COUNT(*)::int AS count FROM alerts WHERE tenant_id=$1${where} GROUP BY disposition`, params);
       disp.rows.forEach(r => { dispositionCounts[r.disposition || 'unknown'] = r.count; });
     } catch {}
-    const handledCount = resolvedCount; // treat resolved as handled (closed also included below)
-    const closedResult = await pool.query("SELECT COUNT(*)::int AS c FROM alerts WHERE tenant_id=$1 AND status='closed'", [req.tenantId]);
-    const handledTotal = handledCount + (closedResult.rows[0]?.c || 0);
-    const escalatedResult = await pool.query('SELECT COUNT(*)::int AS c FROM alerts WHERE tenant_id=$1 AND escalated=TRUE', [req.tenantId]);
+    // handledTotal already computed above from statuses
+    const escalatedResult = await pool.query(`SELECT COUNT(*)::int AS c FROM alerts WHERE tenant_id=$1${where} AND escalated=TRUE`, params);
     const escalatedCount = escalatedResult.rows[0]?.c || 0;
     const uncertainCount = (dispositionCounts['uncertain'] || 0);
 

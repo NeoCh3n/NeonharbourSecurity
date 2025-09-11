@@ -110,7 +110,13 @@ export const hunterApi = {
 };
 
 export const metricsApi = {
-  get: () => apiRequest('/metrics'),
+  get: (params?: { rangeDays?: number; severity?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.rangeDays != null) qs.set('rangeDays', String(params.rangeDays));
+    if (params?.severity) qs.set('severity', params.severity);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return apiRequest(`/metrics${suffix}`);
+  }
 };
 
 export const planApi = {

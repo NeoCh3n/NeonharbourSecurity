@@ -25,8 +25,8 @@ export default function DashboardPage() {
   const [autoEverySec] = useState(300); // 5 min
 
   const metricsQ = useQuery({
-    queryKey: ['metrics'],
-    queryFn: async () => metricsApi.get(),
+    queryKey: ['metrics', rangeDays, sev],
+    queryFn: async () => metricsApi.get({ rangeDays, severity: sev }),
   });
 
   const alertsQ = useQuery({

@@ -7,6 +7,7 @@ const { parse: csvParse } = require('csv-parse/sync');
 const path = require('path');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const crypto = require('crypto');
 const { analyzeAlert, hunterQuery, mapMitre } = require('./ai');
 const { pool, initDatabase } = require('./database');
 
@@ -74,6 +75,68 @@ const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 
 function generateToken(user) {
   return jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
+}
+
+// ---- OAuth helpers ----
+function base64url(input) {
+  return Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+function sha256(input) {
+  return crypto.createHash('sha256').update(input).digest();
+}
+function randomString(bytes = 32) {
+  return base64url(crypto.randomBytes(bytes));
+}
+function buildRedirectUri(req) {
+  const base = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+  return `${base}/auth/oauth/callback`;
+}
+function getFrontendBase() {
+  return process.env.FRONTEND_BASE_URL || 'http://localhost:5173';
+}
+function providerConfig(provider, req) {
+  if (provider === 'google') {
+    return {
+      authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+      tokenUrl: 'https://oauth2.googleapis.com/token',
+      userInfoUrl: 'https://openidconnect.googleapis.com/v1/userinfo',
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || undefined,
+      scope: 'openid email profile',
+      redirectUri: buildRedirectUri(req),
+    };
+  }
+  if (provider === 'microsoft' || provider === 'azure' || provider === 'entra') {
+    const tenant = process.env.AZURE_TENANT_ID || 'common';
+    return {
+      authUrl: `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize`,
+      tokenUrl: `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
+      userInfoUrl: 'https://graph.microsoft.com/oidc/userinfo',
+      clientId: process.env.MS_CLIENT_ID || process.env.AZURE_CLIENT_ID,
+      clientSecret: process.env.MS_CLIENT_SECRET || process.env.AZURE_CLIENT_SECRET || undefined,
+      scope: 'openid email profile offline_access',
+      redirectUri: buildRedirectUri(req),
+    };
+  }
+  return null;
+}
+function decodeJwt(token) {
+  try { return jwt.decode(token) || {}; } catch { return {}; }
+}
+async function ensureUserWithEmail(email) {
+  const r = await pool.query('SELECT id, email, is_admin FROM users WHERE email=$1', [email]);
+  if (r.rows.length) return r.rows[0];
+  const pw = randomString(24);
+  const hashed = await bcrypt.hash(pw, 10);
+  const c = await pool.query('SELECT COUNT(*)::int AS count FROM users');
+  const isAdmin = (c.rows[0]?.count || 0) === 0;
+  const ins = await pool.query('INSERT INTO users (email, password, is_admin) VALUES ($1,$2,$3) RETURNING id, email, is_admin', [email, hashed, isAdmin]);
+  const user = ins.rows[0];
+  try {
+    const def = await pool.query("SELECT id FROM tenants WHERE slug='default' ORDER BY id ASC LIMIT 1");
+    if (def.rows.length) await pool.query('INSERT INTO user_tenants (user_id, tenant_id, role) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [user.id, def.rows[0].id, isAdmin ? 'admin' : 'member']);
+  } catch {}
+  return user;
 }
 
 function parseJsonMaybe(value, fallback) {
@@ -183,6 +246,99 @@ app.post('/auth/login', async (req, res) => {
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Start OAuth flow (Google / Microsoft Entra)
+app.get('/auth/oauth/start', async (req, res) => {
+  try {
+    const provider = String(req.query.provider || '').toLowerCase();
+    if (!provider) return res.status(400).json({ error: 'provider required' });
+    const cfg = providerConfig(provider, req);
+    if (!cfg || !cfg.clientId) return res.status(400).json({ error: 'OAuth not configured for provider' });
+
+    const codeVerifier = randomString(48);
+    const codeChallenge = base64url(sha256(codeVerifier));
+    const state = jwt.sign({ p: provider, v: codeVerifier, t: Date.now() }, JWT_SECRET, { expiresIn: '10m' });
+
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: cfg.clientId,
+      redirect_uri: cfg.redirectUri,
+      scope: cfg.scope,
+      state,
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
+    });
+    const url = `${cfg.authUrl}?${params.toString()}`;
+    res.redirect(url);
+  } catch (e) {
+    console.error('OAuth start error:', e);
+    res.status(500).json({ error: 'OAuth start failed' });
+  }
+});
+
+// OAuth redirect URI (callback)
+app.get('/auth/oauth/callback', async (req, res) => {
+  const { code, state } = req.query || {};
+  if (!code || !state) return res.status(400).send('Missing code/state');
+  try {
+    const payload = jwt.verify(String(state), JWT_SECRET);
+    const provider = String(payload.p || '').toLowerCase();
+    const codeVerifier = String(payload.v || '');
+    const cfg = providerConfig(provider, req);
+    if (!cfg) return res.status(400).send('Invalid provider');
+
+    // Exchange code for tokens
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code: String(code),
+      client_id: cfg.clientId,
+      redirect_uri: cfg.redirectUri,
+      code_verifier: codeVerifier,
+    });
+    if (cfg.clientSecret) body.set('client_secret', cfg.clientSecret);
+
+    const tokenResp = await fetch(cfg.tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    const tokens = await tokenResp.json();
+    if (!tokenResp.ok) {
+      console.error('Token exchange failed:', tokens);
+      return res.status(400).send('Token exchange failed');
+    }
+
+    let email = null;
+    // Try userinfo endpoint first
+    try {
+      if (cfg.userInfoUrl && tokens.access_token) {
+        const uResp = await fetch(cfg.userInfoUrl, { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+        if (uResp.ok) {
+          const u = await uResp.json();
+          email = u.email || u.preferred_username || u.upn || u.mail || null;
+        }
+      }
+    } catch {}
+    // Fallback to id_token claims
+    if (!email && tokens.id_token) {
+      const claims = decodeJwt(tokens.id_token) || {};
+      email = claims.email || claims.preferred_username || claims.upn || claims.unique_name || null;
+    }
+    if (!email || !/@/.test(String(email))) {
+      return res.status(400).send('Unable to obtain verified email');
+    }
+
+    const user = await ensureUserWithEmail(String(email).toLowerCase());
+    const appToken = generateToken(user);
+
+    const frontend = getFrontendBase();
+    const redir = `${frontend}/login#token=${encodeURIComponent(appToken)}`;
+    res.redirect(redir);
+  } catch (e) {
+    console.error('OAuth callback error:', e);
+    res.status(400).send('OAuth callback failed');
   }
 });
 

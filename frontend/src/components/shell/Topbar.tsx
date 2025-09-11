@@ -1,6 +1,6 @@
 import { useTheme } from '../../store/theme';
 import { useUI } from '../../store/ui';
-import { UserMenu } from './UserMenu';
+import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-react';
 
 export function Topbar() {
   const { theme, setTheme } = useTheme();
@@ -22,7 +22,12 @@ export function Topbar() {
           <option value="theme-dark">Dark</option>
           <option value="theme-hc">High Contrast</option>
         </select>
-        <UserMenu />
+        <SignedOut>
+          <SignInButton />
+        </SignedOut>
+        <SignedIn>
+          <UserButton />
+        </SignedIn>
       </div>
     </header>
   );

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAuth } from '../store/auth';
+import { useUser, useAuth as useClerkAuth } from '@clerk/clerk-react';
 import apiRequest, { integrationsApi, IntegrationItem } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
@@ -9,29 +9,31 @@ export default function IngestPage() {
   const [integrations, setIntegrations] = useState<IntegrationItem[]>([]);
   const [savingIntegrations, setSavingIntegrations] = useState(false);
   const navigate = useNavigate();
-  const { me, refresh } = useAuth();
+  const { user } = useUser();
+  const { isSignedIn } = useClerkAuth();
 
   useEffect(() => {
-    const t = localStorage.getItem('token');
-    if (t) setStatus('Signed in / Token present');
-    if (t) { integrationsApi.get().then(d => setIntegrations(d.integrations || [])).catch(()=>{}); }
-    void refresh();
-  }, []);
+    if (isSignedIn) {
+      setStatus('Signed in via Clerk');
+      integrationsApi.get().then(d => setIntegrations(d.integrations || [])).catch(()=>{});
+    } else {
+      setStatus('Not signed in');
+    }
+  }, [isSignedIn]);
 
   useEffect(() => {
     // When user changes, refresh integrations and status banner
-    const t = localStorage.getItem('token');
-    if (t) {
+    if (isSignedIn) {
       integrationsApi.get().then(d => setIntegrations(d.integrations || [])).catch(()=>{});
-      setStatus(`Signed in${me?.email ? ' as ' + me.email : ''}`);
+      setStatus(`Signed in${user?.primaryEmailAddress?.emailAddress ? ' as ' + user.primaryEmailAddress.emailAddress : ''}`);
     } else {
       setStatus('Not signed in');
       setIntegrations([]);
     }
-  }, [me?.id]);
+  }, [isSignedIn, user?.id]);
 
   async function ingestSamples() {
-    if (!localStorage.getItem('token')) { navigate('/login'); return; }
+    if (!isSignedIn) { navigate('/login'); return; }
     setBusy(true);
     setStatus('Ingesting sample alerts...');
     try {
@@ -51,7 +53,7 @@ export default function IngestPage() {
   }
 
   async function viewAlerts() {
-    if (localStorage.getItem('token')) navigate('/alerts-list');
+    if (isSignedIn) navigate('/alerts-list');
     else navigate('/login');
   }
 
@@ -60,8 +62,8 @@ export default function IngestPage() {
       <div className="bg-surface rounded-lg border border-border p-3 flex items-center justify-between">
         <div className="text-sm text-muted">In-Browser Validation</div>
         <div className="text-sm">
-          {me ? (
-            <span>Signed in as <span className="font-medium">{me.email}</span> · Tenant <span className="font-medium">{me.currentTenantId ?? '-'}</span></span>
+          {isSignedIn ? (
+            <span>Signed in as <span className="font-medium">{user?.primaryEmailAddress?.emailAddress || 'user'}</span></span>
           ) : (
             <span className="text-muted">Not signed in</span>
           )}
@@ -69,9 +71,9 @@ export default function IngestPage() {
       </div>
       <div className="bg-surface rounded-lg border border-border p-3 shadow-sm">
         <div className="text-sm text-muted mb-2">Data validation helpers</div>
-        {me ? (
+        {isSignedIn ? (
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted">Signed in as</span> <span className="px-2 py-0.5 rounded bg-surfaceAlt border border-border">{me.email}</span>
+            <span className="text-muted">Signed in as</span> <span className="px-2 py-0.5 rounded bg-surfaceAlt border border-border">{user?.primaryEmailAddress?.emailAddress || 'user'}</span>
             <button className="ml-2 px-3 py-1.5 border border-border rounded-md" onClick={ingestSamples} disabled={busy}>Ingest Samples</button>
             <button className="px-3 py-1.5 border border-border rounded-md" onClick={viewAlerts}>View Alerts</button>
           </div>
@@ -89,7 +91,7 @@ export default function IngestPage() {
         <IntegrationsEditor items={integrations} onChange={setIntegrations} />
         <div className="mt-3">
           <button disabled={savingIntegrations} className="px-3 py-1.5 border border-border rounded-md" onClick={async ()=>{
-            if (!localStorage.getItem('token')) { setStatus('Not signed in, cannot save'); navigate('/login'); return; }
+            if (!isSignedIn) { setStatus('Not signed in, cannot save'); navigate('/login'); return; }
             setSavingIntegrations(true);
             try {
               await integrationsApi.save(integrations);

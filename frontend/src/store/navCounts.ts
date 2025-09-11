@@ -17,8 +17,10 @@ type NavCountsState = Counts & {
 
 async function fetchCounts(): Promise<Counts> {
   const base = (import.meta as any).env.VITE_API_BASE_URL || '/api';
-  const token = localStorage.getItem('token');
-  const r = await fetch(`${base}/nav/counts`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  let token: string | null = null;
+  try { token = await ((window as any).Clerk?.session?.getToken?.()); } catch {}
+  if (!token) token = localStorage.getItem('token');
+  const r = await fetch(`${base}/nav/counts`, { headers: token ? { Authorization: `Bearer ${token}` } as any : {} });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
@@ -43,8 +45,8 @@ export const useNavCounts = create<NavCountsState>((set, get) => ({
   startAutoRefresh: () => {
     if ((window as any).__navCountsTimer) return;
     (window as any).__navCountsTimer = setInterval(() => {
-      const token = localStorage.getItem('token');
-      if (!token) return; // skip when logged out
+      const hasSession = !!((window as any).Clerk?.session);
+      if (!hasSession) return; // skip when logged out
       get().refresh().catch(()=>{});
     }, 30000);
   }

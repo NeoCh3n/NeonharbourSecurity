@@ -8,12 +8,13 @@ import { useUI } from '../store/ui';
 import { useNavigate } from 'react-router-dom';
 import { alertsApi, metricsApi } from '../services/api';
 import apiRequest from '../services/api';
-import { useAuth } from '../store/auth';
+import { useUser } from '@clerk/clerk-react';
 
 type TrendPoint = { day: string; alerts: number };
 
 export default function DashboardPage() {
-  const { me } = useAuth();
+  const { user } = useUser();
+  const isAdmin = Boolean((user?.publicMetadata as any)?.isAdmin);
   const setRight = useUI(s => s.setRightPanelOpen);
   const [rangeDays, setRangeDays] = useState<number>(30);
   const [sev, setSev] = useState<'all'|'critical'|'high'|'medium'|'low'>('all');
@@ -185,7 +186,7 @@ export default function DashboardPage() {
             const q = sev==='all' ? '' : `&severity=${sev}`;
             navigate(`/alerts-list?f=all${q}`);
           }}>Open Triage</button>
-          {me?.isAdmin && (
+          {isAdmin && (
             <>
               <span className="mx-2">|</span>
               <span className="text-muted">Ops:</span>
@@ -207,45 +208,45 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Global overview KPIs (environment-wide) */}
-      {!unauthorized && (
-        <section className="grid grid-cols-12 gap-3">
-          <OverviewKpi title="Total" value={kpi.totalAlerts||0} hint={kpi.backlogCount!=null?`Backlog ${kpi.backlogCount}`:undefined} color="#0EA5E9" />
-          <OverviewKpi title="Handled" value={kpi.handledCount||0} hint={`${pct(kpi.handledCount||0, kpi.totalAlerts||0)}%`} color="#22C55E" />
-          <OverviewKpi title="Escalated" value={kpi.escalatedCount||0} hint={`${pct(kpi.escalatedCount||0, kpi.totalAlerts||0)}%`} color="#EF4444" />
-          <OverviewKpi title="Uncertain" value={kpi.uncertainCount||0} hint={`${pct(kpi.uncertainCount||0, kpi.totalAlerts||0)}%`} color="#F59E0B" />
-          <OverviewKpi title="MTTI" valueLabel={fmtMin(kpi.mttiSec)} hint={`Investigated ${kpi.investigatedCount||0}`} color="#14B8A6" />
-          <OverviewKpi title="MTTR" valueLabel={fmtMin(kpi.mttrSec)} hint={`Resolved ${kpi.resolvedCount||0}`} color="#8B5CF6" />
-        </section>
-      )}
-
-      {/* KPI cards (clickable) */}
-      <section className="grid grid-cols-12 gap-3">
+      {/* Unified KPI row: combines global overview and interactive cards into a single row */}
+      <section className="flex flex-nowrap gap-3 overflow-x-auto pb-1">
+        {!unauthorized && (
+          <>
+            <OverviewKpi className="min-w-[220px]" title="Total" value={kpi.totalAlerts||0} hint={kpi.backlogCount!=null?`Backlog ${kpi.backlogCount}`:undefined} color="#0EA5E9" />
+            <OverviewKpiPairCompact
+              className="min-w-[260px]"
+              items={[
+                { title: 'MTTI', valueLabel: fmtMin(kpi.mttiSec), hint: `Investigated ${kpi.investigatedCount||0}`, color: '#14B8A6' },
+                { title: 'MTTR', valueLabel: fmtMin(kpi.mttrSec), hint: `Resolved ${kpi.resolvedCount||0}`, color: '#8B5CF6' },
+              ]}
+            />
+          </>
+        )}
         <KpiCard
-          className="col-span-12 md:col-span-3"
+          className="min-w-[240px]"
           title="Active"
           value={activeCount}
-          hint={`${totalInvestigations} total`}
+          hint={`${pct(activeCount, totalInvestigations)}% of ${totalInvestigations || 0}`}
           onClick={() => navigate(`/alerts-list?f=all&active=1${sev==='all'?'':`&severity=${sev}`}`)}
           spark={buildSpark(alertsQ.data?.alerts || [], rangeDays, sev, { mode: 'active' })}
         />
         <KpiCard
-          className="col-span-12 md:col-span-3"
+          className="min-w-[240px]"
           title="Handled"
           value={handledCount}
-          hint={`${handledCount} resolved/closed`}
+          hint={`${pct(handledCount, totalInvestigations)}% of ${totalInvestigations || 0}`}
           onClick={() => navigate(`/alerts-list?f=all&handled=1${sev==='all'?'':`&severity=${sev}`}`)}
           spark={buildSpark(alertsQ.data?.alerts || [], rangeDays, sev, { mode: 'handled' })}
         />
         <KpiCard
-          className="col-span-12 md:col-span-3"
+          className="min-w-[240px]"
           title="Escalated"
           value={escalatedCount}
           onClick={() => navigate(`/alerts-list?f=all&e=1${sev==='all'?'':`&severity=${sev}`}`)}
           spark={buildSpark(alertsQ.data?.alerts || [], rangeDays, sev, { mode: 'escalated' })}
         />
         <KpiCard
-          className="col-span-12 md:col-span-3"
+          className="min-w-[240px]"
           title="Uncertain"
           value={uncertainCount}
           onClick={() => navigate(`/alerts-list?f=all&disposition=uncertain${sev==='all'?'':`&severity=${sev}`}`)}
@@ -330,11 +331,11 @@ type SparkPoint = { day: string; value: number };
 function KpiCard({ title, value, hint, className = '', onClick, spark }: { title: string; value: number; hint?: string; className?: string; onClick?: () => void; spark?: SparkPoint[] }) {
   return (
     <div className={`${className} bg-surface rounded-lg border border-border p-4 shadow-sm cursor-pointer hover:bg-surfaceAlt transition`} onClick={onClick} role="button" tabIndex={0} onKeyDown={(e)=>{ if (e.key==='Enter') onClick?.(); }}>
-      <div className="text-sm text-muted mb-1 flex items-center gap-2">
-        <span>{title}</span>
-        {hint && <span className="ml-auto text-xs text-muted">{hint}</span>}
+      <div className="text-sm text-muted mb-1">{title}</div>
+      <div className="flex items-baseline gap-2">
+        <div className="text-5xl leading-none font-semibold">{value}</div>
+        {hint && <div className="text-xs text-muted">({hint})</div>}
       </div>
-      <div className="text-5xl leading-none font-semibold">{value}</div>
       {spark && spark.length > 1 && (
         <div className="mt-2 w-full h-[36px]">
           <ResponsiveContainer width="100%" height="100%">
@@ -376,14 +377,30 @@ function buildSpark(alerts: any[], rangeDays: number, sev: 'all'|'critical'|'hig
   return days.map(day => ({ day, value: map[day] || 0 }));
 }
 
-function OverviewKpi({ title, value, valueLabel, hint, color = '#6B7280' }: { title: string; value?: number; valueLabel?: string; hint?: string; color?: string }) {
+function OverviewKpi({ title, value, valueLabel, hint, color = '#6B7280', className = '' }: { title: string; value?: number; valueLabel?: string; hint?: string; color?: string; className?: string }) {
   const fmtNum = (n?: number) => new Intl.NumberFormat().format(n || 0);
   const display = typeof valueLabel === 'string' ? valueLabel : fmtNum(value);
   return (
-    <div className="col-span-12 md:col-span-6 lg:col-span-2 bg-surface rounded-lg border border-border p-3 shadow-sm">
+    <div className={`${className} bg-surface rounded-lg border border-border p-3 shadow-sm`}>
       <div className="text-sm text-muted">{title}</div>
       <div className="text-4xl md:text-5xl font-semibold font-mono" style={{ color }}>{display}</div>
       {hint && <div className="text-xs text-muted">{hint}</div>}
+    </div>
+  );
+}
+
+function OverviewKpiPairCompact({ items, className = '' }: { items: { title: string; valueLabel: string; hint?: string; color?: string }[]; className?: string }) {
+  return (
+    <div className={`${className} bg-surface rounded-lg border border-border p-3 shadow-sm`}>
+      <div className="space-y-2">
+        {items.map((it, idx) => (
+          <div key={idx}>
+            <div className="text-xs text-muted">{it.title}</div>
+            <div className="text-2xl font-semibold font-mono" style={{ color: it.color || '#6B7280' }}>{it.valueLabel}</div>
+            {it.hint && <div className="text-[11px] text-muted">{it.hint}</div>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -10,7 +10,14 @@ export class ApiError extends Error {
 }
 
 async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
-  const token = localStorage.getItem('token');
+  let token: string | null = null;
+  try {
+    // Prefer Clerk session token when signed in
+    token = await ((window as any).Clerk?.session?.getToken?.());
+  } catch {}
+  if (!token) {
+    token = localStorage.getItem('token');
+  }
   const isFormData = options && typeof (options as any).body !== 'undefined' && (options as any).body instanceof FormData;
 
   const headers: Record<string, string> = {

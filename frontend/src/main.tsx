@@ -1,11 +1,12 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ClerkProvider } from '@clerk/clerk-react';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import './index.css';
 // Explicit .tsx extensions to avoid picking legacy .jsx files
 import App from './App.tsx';
-import LoginPage from './pages/Login.tsx';
+import SignInPage from './pages/SignInPage.tsx';
 import PlanPage from './pages/Plan.tsx';
 import InvestigatePage from './pages/Investigate.tsx';
 import RespondPage from './pages/Respond.tsx';
@@ -54,17 +55,24 @@ const router = createBrowserRouter([
       ,{ path: 'admin', element: <AdminSettingsPage /> }
     ]
   },
-  { path: '/login', element: <LoginPage /> }
+  { path: '/login', element: <SignInPage /> }
 ]);
 
 const qc = new QueryClient();
 
+const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
+if (!PUBLISHABLE_KEY) {
+  throw new Error('Missing Clerk Publishable Key (VITE_CLERK_PUBLISHABLE_KEY)');
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <QueryClientProvider client={qc}>
-      <ThemeProvider>
-        <RouterProvider router={router} />
-      </ThemeProvider>
-    </QueryClientProvider>
+    <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/">
+      <QueryClientProvider client={qc}>
+        <ThemeProvider>
+          <RouterProvider router={router} />
+        </ThemeProvider>
+      </QueryClientProvider>
+    </ClerkProvider>
   </StrictMode>
 );

@@ -62,9 +62,7 @@ export default function CasesPage() {
                       <textarea className="flex-1 px-2 py-1 border border-border rounded-md min-h-[60px]" value={briefDraft} onChange={e=>setBriefDraft(e.target.value)} maxLength={2000} />
                       <button className="px-2 py-1 border border-border rounded-md" onClick={async ()=>{
                         try {
-                          const resp = await fetch(((import.meta as any).env.VITE_API_BASE_URL || '/api') + `/cases/${r.id}/brief`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')||''}` }, body: JSON.stringify({ brief: briefDraft }) });
-                          if (!resp.ok) throw new Error('Save failed');
-                          const data = await resp.json();
+                          const data = await apiRequest(`/cases/${r.id}/brief`, { method: 'POST', body: JSON.stringify({ brief: briefDraft }) });
                           const updated = rows.map(row => row.id===r.id ? { ...row, context: { ...(row.context||{}), brief: data.brief } } : row);
                           setRows(updated);
                           setEditingId(null);

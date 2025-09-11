@@ -20,6 +20,7 @@ import CasesPage from './pages/Cases.tsx';
 import CaseDetailPage from './pages/CaseDetail.tsx';
 import ApprovalsPage from './pages/Approvals.tsx';
 import PoliciesPage from './pages/Policies.tsx';
+import DashboardPage from './pages/Dashboard.tsx';
 import AdminSettingsPage from './pages/AdminSettings.tsx';
 import { ThemeProvider } from './store/theme';
 import { worker } from './mocks/browser';
@@ -36,6 +37,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <PlanPage /> },
       { path: 'plan', element: <PlanPage /> },
+      { path: 'dashboard', element: <DashboardPage /> },
       { path: 'investigate', element: <InvestigatePage /> },
       { path: 'respond', element: <RespondPage /> },
       { path: 'adapt', element: <AdaptPage /> },

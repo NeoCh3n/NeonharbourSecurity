@@ -6,7 +6,7 @@ import { useNavCounts } from '../../store/navCounts';
 type NavItem = { to: string; icon: string; label: string; title?: string };
 
 const NAV: NavItem[] = [
-  { to: '/report', icon: '📊', label: 'Dashboard', title: 'KPI & trends' },
+  { to: '/dashboard', icon: '📊', label: 'Dashboard', title: 'KPI & trends' },
   { to: '/alerts-list', icon: '🚨', label: 'Triage', title: 'Triage queue' },
   { to: '/cases', icon: '🗂️', label: 'Cases', title: 'All cases' },
   { to: '/hunt', icon: '🧭', label: 'Hunt', title: 'Threat hunting' },

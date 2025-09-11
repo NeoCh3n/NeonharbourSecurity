@@ -59,6 +59,9 @@ export default function DashboardPage() {
   }, [autoRun, opMode, autoEverySec]);
 
   const unauthorized = (metricsQ.error as any)?.status === 401 || (alertsQ.error as any)?.status === 401;
+  const kpi = (metricsQ.data as any) || {};
+  function fmtMin(s?: number) { const v = Math.max(0, Math.round(s || 0)); return (v/60).toFixed(1) + ' min'; }
+  function pct(a: number, b: number) { return b > 0 ? Math.round((a/b)*100) : 0; }
 
   // Build last N-day trend from alerts
   const trend: TrendPoint[] = useMemo(() => {
@@ -202,6 +205,18 @@ export default function DashboardPage() {
         <div role="alert" className="bg-surface rounded-lg border border-border p-3 text-sm">
           Not signed in or token expired. Please sign in.
         </div>
+      )}
+
+      {/* Global overview KPIs (environment-wide) */}
+      {!unauthorized && (
+        <section className="grid grid-cols-12 gap-3">
+          <OverviewKpi title="Total" value={kpi.totalAlerts||0} hint={kpi.backlogCount!=null?`Backlog ${kpi.backlogCount}`:undefined} color="#0EA5E9" />
+          <OverviewKpi title="Handled" value={kpi.handledCount||0} hint={`${pct(kpi.handledCount||0, kpi.totalAlerts||0)}%`} color="#22C55E" />
+          <OverviewKpi title="Escalated" value={kpi.escalatedCount||0} hint={`${pct(kpi.escalatedCount||0, kpi.totalAlerts||0)}%`} color="#EF4444" />
+          <OverviewKpi title="Uncertain" value={kpi.uncertainCount||0} hint={`${pct(kpi.uncertainCount||0, kpi.totalAlerts||0)}%`} color="#F59E0B" />
+          <OverviewKpi title="MTTI" valueLabel={fmtMin(kpi.mttiSec)} hint={`Investigated ${kpi.investigatedCount||0}`} color="#14B8A6" />
+          <OverviewKpi title="MTTR" valueLabel={fmtMin(kpi.mttrSec)} hint={`Resolved ${kpi.resolvedCount||0}`} color="#8B5CF6" />
+        </section>
       )}
 
       {/* KPI cards (clickable) */}
@@ -359,4 +374,16 @@ function buildSpark(alerts: any[], rangeDays: number, sev: 'all'|'critical'|'hig
     if (ok) map[day] = (map[day] || 0) + 1;
   }
   return days.map(day => ({ day, value: map[day] || 0 }));
+}
+
+function OverviewKpi({ title, value, valueLabel, hint, color = '#6B7280' }: { title: string; value?: number; valueLabel?: string; hint?: string; color?: string }) {
+  const fmtNum = (n?: number) => new Intl.NumberFormat().format(n || 0);
+  const display = typeof valueLabel === 'string' ? valueLabel : fmtNum(value);
+  return (
+    <div className="col-span-12 md:col-span-6 lg:col-span-2 bg-surface rounded-lg border border-border p-3 shadow-sm">
+      <div className="text-sm text-muted">{title}</div>
+      <div className="text-4xl md:text-5xl font-semibold font-mono" style={{ color }}>{display}</div>
+      {hint && <div className="text-xs text-muted">{hint}</div>}
+    </div>
+  );
 }

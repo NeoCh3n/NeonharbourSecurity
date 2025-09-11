@@ -58,7 +58,7 @@ export default function AlertWorkspacePage() {
           {tab==='plan' && <PlanPage alertIdOverride={alertId} />}
           {tab==='investigate' && <InvestigatePage alertIdOverride={alertId} />}
           {tab==='respond' && <RespondPage alertIdOverride={alertId} />}
-          {tab==='report' && <ReportPage />}
+          {tab==='report' && <ReportPage alertIdOverride={alertId} />}
           {tab==='hunt' && <ThreatHunterPage />}
         </div>
       )}

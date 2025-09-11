@@ -13,10 +13,10 @@ export default function App() {
   const navigate = useNavigate();
   const { refresh, token, me, loading } = useAuth();
 
-  // Example: redirect unknown root to dashboard
+  // Redirect root to dashboard (global overview)
   useEffect(() => {
     if (location.pathname === '/') {
-      navigate('/report', { replace: true });
+      navigate('/dashboard', { replace: true });
     }
   }, [location.pathname, navigate]);
 

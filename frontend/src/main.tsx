@@ -23,6 +23,9 @@ import ApprovalsPage from './pages/Approvals.tsx';
 import PoliciesPage from './pages/Policies.tsx';
 import DashboardPage from './pages/Dashboard.tsx';
 import AdminSettingsPage from './pages/AdminSettings.tsx';
+import InvestigationsListPage from './pages/InvestigationsList.tsx';
+import InvestigationDetailPage from './pages/InvestigationDetail.tsx';
+import InvestigationMetricsPage from './pages/InvestigationMetrics.tsx';
 import { ThemeProvider } from './store/theme';
 import { worker } from './mocks/browser';
 
@@ -49,10 +52,13 @@ const router = createBrowserRouter([
       { path: 'cases/:id', element: <CaseDetailPage /> },
       { path: 'ingest', element: <IngestPage /> },
       { path: 'alerts-list', element: <AlertsListPage /> }
-      ,{ path: 'alerts/:id', element: <AlertDetailPage /> }
-      ,{ path: 'approvals', element: <ApprovalsPage /> }
-      ,{ path: 'policies', element: <PoliciesPage /> }
-      ,{ path: 'admin', element: <AdminSettingsPage /> }
+      , { path: 'alerts/:id', element: <AlertDetailPage /> }
+      , { path: 'approvals', element: <ApprovalsPage /> }
+      , { path: 'policies', element: <PoliciesPage /> }
+      , { path: 'admin', element: <AdminSettingsPage /> }
+      , { path: 'investigations', element: <InvestigationsListPage /> }
+      , { path: 'investigations/metrics', element: <InvestigationMetricsPage /> }
+      , { path: 'investigations/:id', element: <InvestigationDetailPage /> }
     ]
   },
   { path: '/login', element: <SignInPage /> }

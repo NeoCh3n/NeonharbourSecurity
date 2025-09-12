@@ -8,6 +8,7 @@ type NavItem = { to: string; icon: string; label: string; title?: string };
 const NAV: NavItem[] = [
   { to: '/dashboard', icon: '📊', label: 'Dashboard', title: 'KPI & trends' },
   { to: '/alerts-list', icon: '🚨', label: 'Triage', title: 'Triage queue' },
+  { to: '/investigations', icon: '🔍', label: 'Investigations', title: 'AI Investigations' },
   { to: '/cases', icon: '🗂️', label: 'Cases', title: 'All cases' },
   { to: '/hunt', icon: '🧭', label: 'Hunt', title: 'Threat hunting' },
   { to: '/approvals', icon: '✅', label: 'Approvals', title: 'Action approvals' },
@@ -33,7 +34,7 @@ export function Sidebar() {
       <nav className="p-2">
         <div className="text-xs text-muted px-2 py-1">Work</div>
         <ul className="space-y-1">
-          {NAV.slice(0,5).map(item => (
+          {NAV.slice(0,6).map(item => (
             <li key={item.to}>
               <NavLink
                 to={item.to}

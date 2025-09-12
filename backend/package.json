@@ -5,7 +5,12 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "jest"
+    "test": "jest",
+    "test:unit": "jest --testPathIgnorePatterns=e2e",
+    "test:e2e": "node test/run-e2e-tests.js",
+    "test:e2e:parallel": "node test/run-e2e-tests.js --parallel",
+    "test:e2e:verbose": "node test/run-e2e-tests.js --verbose",
+    "test:all": "npm run test:unit && npm run test:e2e"
   },
   "keywords": [],
   "author": "",

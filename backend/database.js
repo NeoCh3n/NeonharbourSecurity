@@ -352,6 +352,183 @@ async function initDatabase() {
     try { await pool.query('ALTER TABLE case_plans ADD CONSTRAINT fk_case_plans_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE'); } catch {}
     try { await pool.query(`ALTER TABLE case_plans ALTER COLUMN tenant_id SET DEFAULT ${tenantDefaultExpr}`); } catch {}
 
+    // Investigation Engine tables
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS investigations (
+        id VARCHAR(100) PRIMARY KEY,
+        alert_id INTEGER REFERENCES alerts(id) ON DELETE CASCADE,
+        case_id INTEGER REFERENCES cases(id) ON DELETE SET NULL,
+        tenant_id INTEGER NOT NULL DEFAULT ${tenantDefaultExpr} REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        status VARCHAR(30) DEFAULT 'planning',
+        priority INTEGER DEFAULT 3,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP,
+        completed_at TIMESTAMP,
+        context JSONB
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_investigations_alert ON investigations (alert_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_investigations_tenant_status ON investigations (tenant_id, status)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_investigations_tenant_created ON investigations (tenant_id, created_at)');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS investigation_steps (
+        id SERIAL PRIMARY KEY,
+        investigation_id VARCHAR(100) REFERENCES investigations(id) ON DELETE CASCADE,
+        step_order INTEGER NOT NULL,
+        agent_type VARCHAR(50) NOT NULL,
+        step_name VARCHAR(200) NOT NULL,
+        status VARCHAR(30) DEFAULT 'pending',
+        started_at TIMESTAMP,
+        completed_at TIMESTAMP,
+        input_data JSONB,
+        output_data JSONB,
+        error_message TEXT,
+        retry_count INTEGER DEFAULT 0
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_investigation_steps_investigation ON investigation_steps (investigation_id, step_order)');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS investigation_feedback (
+        id SERIAL PRIMARY KEY,
+        investigation_id VARCHAR(100) REFERENCES investigations(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        tenant_id INTEGER NOT NULL DEFAULT ${tenantDefaultExpr} REFERENCES tenants(id) ON DELETE CASCADE,
+        feedback_type VARCHAR(50),
+        content JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_investigation_feedback_investigation ON investigation_feedback (investigation_id, created_at)');
+
+    // Evidence Management tables
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS investigation_evidence (
+        id VARCHAR(100) PRIMARY KEY,
+        investigation_id VARCHAR(100) REFERENCES investigations(id) ON DELETE CASCADE,
+        tenant_id INTEGER NOT NULL DEFAULT ${tenantDefaultExpr} REFERENCES tenants(id) ON DELETE CASCADE,
+        type VARCHAR(50) NOT NULL,
+        source VARCHAR(100) NOT NULL,
+        timestamp TIMESTAMP NOT NULL,
+        data JSONB NOT NULL,
+        metadata JSONB DEFAULT '{}',
+        entities JSONB DEFAULT '{}',
+        quality_score REAL DEFAULT 0.5,
+        confidence REAL DEFAULT 0.5,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_investigation_evidence_investigation ON investigation_evidence (investigation_id, timestamp)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_investigation_evidence_tenant_type ON investigation_evidence (tenant_id, type, timestamp)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_investigation_evidence_source ON investigation_evidence (source, timestamp)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_investigation_evidence_confidence ON investigation_evidence (confidence DESC)');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS evidence_relationships (
+        id SERIAL PRIMARY KEY,
+        evidence_id VARCHAR(100) REFERENCES investigation_evidence(id) ON DELETE CASCADE,
+        related_evidence_id VARCHAR(100) REFERENCES investigation_evidence(id) ON DELETE CASCADE,
+        relationship_type VARCHAR(50) NOT NULL,
+        strength REAL DEFAULT 0.5,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(evidence_id, related_evidence_id)
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_evidence_relationships_evidence ON evidence_relationships (evidence_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_evidence_relationships_related ON evidence_relationships (related_evidence_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_evidence_relationships_type ON evidence_relationships (relationship_type, strength DESC)');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS evidence_tags (
+        evidence_id VARCHAR(100) REFERENCES investigation_evidence(id) ON DELETE CASCADE,
+        tag VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (evidence_id, tag)
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_evidence_tags_tag ON evidence_tags (tag)');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS evidence_correlations (
+        id SERIAL PRIMARY KEY,
+        investigation_id VARCHAR(100) REFERENCES investigations(id) ON DELETE CASCADE,
+        tenant_id INTEGER NOT NULL DEFAULT ${tenantDefaultExpr} REFERENCES tenants(id) ON DELETE CASCADE,
+        correlation_type VARCHAR(50) NOT NULL,
+        evidence_ids VARCHAR(100)[] NOT NULL,
+        strength REAL DEFAULT 0.5,
+        description TEXT,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_evidence_correlations_investigation ON evidence_correlations (investigation_id, correlation_type)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_evidence_correlations_strength ON evidence_correlations (strength DESC)');
+
+    // Learning and Adaptation System tables
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS learning_patterns (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL DEFAULT ${tenantDefaultExpr} REFERENCES tenants(id) ON DELETE CASCADE,
+        pattern_type VARCHAR(50) NOT NULL,
+        context JSONB NOT NULL,
+        impact_score REAL DEFAULT 0.5,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_learning_patterns_tenant_type ON learning_patterns (tenant_id, pattern_type, created_at)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_learning_patterns_impact ON learning_patterns (impact_score DESC)');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS performance_metrics (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL DEFAULT ${tenantDefaultExpr} REFERENCES tenants(id) ON DELETE CASCADE,
+        date DATE NOT NULL,
+        accuracy REAL DEFAULT 0,
+        mtti_seconds INTEGER DEFAULT 0,
+        mttr_seconds INTEGER DEFAULT 0,
+        false_positive_rate REAL DEFAULT 0,
+        investigation_quality REAL DEFAULT 0,
+        response_effectiveness REAL DEFAULT 0,
+        total_investigations INTEGER DEFAULT 0,
+        correct_verdicts INTEGER DEFAULT 0,
+        false_positives INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(tenant_id, date)
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_performance_metrics_tenant_date ON performance_metrics (tenant_id, date)');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS strategy_adaptations (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL DEFAULT ${tenantDefaultExpr} REFERENCES tenants(id) ON DELETE CASCADE,
+        adaptation_id VARCHAR(200) NOT NULL,
+        type VARCHAR(50) NOT NULL,
+        priority VARCHAR(20) NOT NULL,
+        description TEXT,
+        context VARCHAR(200),
+        current_config JSONB,
+        proposed_config JSONB,
+        expected_impact REAL DEFAULT 0,
+        reasoning TEXT,
+        metadata JSONB DEFAULT '{}',
+        applied BOOLEAN DEFAULT false,
+        dry_run BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        applied_at TIMESTAMP
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_strategy_adaptations_tenant ON strategy_adaptations (tenant_id, created_at)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_strategy_adaptations_type ON strategy_adaptations (type, applied)');
+
     // Phase B tables: ticketing, collaboration, KPIs, tuning, suppression
     await pool.query(`
       CREATE TABLE IF NOT EXISTS tickets (

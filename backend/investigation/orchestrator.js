@@ -1,5 +1,5 @@
 const { pool } = require('../database');
-const { auditLog } = require('../middleware/audit');
+const { auditLog, auditInvestigationAction, generateTraceId } = require('../middleware/audit');
 
 /**
  * Investigation Orchestrator - Central coordinator for investigation lifecycle
@@ -84,6 +84,23 @@ class InvestigationOrchestrator {
 
     const investigationRecord = investigation.rows[0];
 
+    // Log investigation creation for audit trail
+    await auditInvestigationAction(
+      investigationId,
+      'investigation_created',
+      {
+        alertId,
+        caseId: alert.case_id,
+        priority,
+        timeoutMs,
+        alertSummary: alert.summary,
+        alertSeverity: alert.severity,
+        traceId: generateTraceId()
+      },
+      userId,
+      tenantId
+    );
+
     // Add to active investigations
     this.activeInvestigations.set(investigationId, {
       ...investigationRecord,
@@ -165,10 +182,19 @@ class InvestigationOrchestrator {
     investigation.pausedBy = userId;
     investigation.pausedAt = new Date();
 
-    await auditLog(userId, 'investigation_paused', {
+    // Enhanced audit logging
+    await auditInvestigationAction(
       investigationId,
+      'investigation_paused',
+      {
+        pausedBy: userId,
+        pausedAt: investigation.pausedAt,
+        previousStatus: investigation.previousStatus || 'executing',
+        traceId: generateTraceId()
+      },
+      userId,
       tenantId
-    });
+    );
   }
 
   /**
@@ -197,10 +223,19 @@ class InvestigationOrchestrator {
     // Re-queue for processing
     this._queueInvestigation(investigationId, investigation.priority);
 
-    await auditLog(userId, 'investigation_resumed', {
+    // Enhanced audit logging
+    await auditInvestigationAction(
       investigationId,
+      'investigation_resumed',
+      {
+        resumedBy: userId,
+        resumedAt: new Date(),
+        pausedDuration: investigation.pausedAt ? Date.now() - investigation.pausedAt.getTime() : null,
+        traceId: generateTraceId()
+      },
+      userId,
       tenantId
-    });
+    );
   }
 
   /**

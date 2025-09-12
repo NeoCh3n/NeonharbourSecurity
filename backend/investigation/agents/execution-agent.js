@@ -11,6 +11,7 @@
 
 const { BaseAgent } = require('./base-agent');
 const { connectorFramework } = require('../../connectors');
+const { auditInvestigationAction, auditApiCall } = require('../../middleware/audit');
 
 class ExecutionAgent extends BaseAgent {
   constructor(name, config = {}) {
@@ -22,7 +23,7 @@ class ExecutionAgent extends BaseAgent {
       adaptationThreshold: 0.3, // Adapt plan if 30% of steps fail
       ...config
     });
-    
+
     this.activeSteps = new Map();
     this.completedSteps = new Map();
     this.failedSteps = new Map();
@@ -39,19 +40,19 @@ class ExecutionAgent extends BaseAgent {
    */
   async execute(context, input) {
     const { plan, investigationId, alertContext } = input;
-    
+
     if (!plan || !plan.steps || !Array.isArray(plan.steps)) {
       throw new Error('Invalid investigation plan: missing or invalid steps');
     }
 
     // Initialize execution state
     this._initializeExecution(investigationId, plan);
-    
+
     try {
       // Execute steps with dependency management
       const executionResult = await this._executeStepsWithDependencies(
-        context, 
-        plan.steps, 
+        context,
+        plan.steps,
         alertContext
       );
 
@@ -107,6 +108,22 @@ class ExecutionAgent extends BaseAgent {
       this._updateStepStatus(stepId, 'running', { startTime });
       this._notifyProgress('step_started', { stepId, step });
 
+      // Audit log step execution start
+      await auditInvestigationAction(
+        context.investigationId,
+        'step_execution_started',
+        {
+          stepId,
+          stepType: step.type,
+          stepName: step.description || step.name,
+          dataSources: step.dataSources || [],
+          dependencies: step.dependencies || [],
+          startTime: new Date(startTime).toISOString()
+        },
+        context.userId,
+        context.tenantId
+      );
+
       // Validate step configuration
       const validation = this._validateStep(step);
       if (!validation.valid) {
@@ -138,13 +155,30 @@ class ExecutionAgent extends BaseAgent {
       }
 
       const executionTime = Date.now() - startTime;
-      this._updateStepStatus(stepId, 'completed', { 
-        result, 
+      this._updateStepStatus(stepId, 'completed', {
+        result,
         executionTime,
         completedAt: new Date().toISOString()
       });
-      
+
       this._notifyProgress('step_completed', { stepId, step, result, executionTime });
+
+      // Audit log step completion
+      await auditInvestigationAction(
+        context.investigationId,
+        'step_execution_completed',
+        {
+          stepId,
+          stepType: step.type,
+          stepName: step.description || step.name,
+          executionTimeMs: executionTime,
+          evidenceCount: result.evidence ? result.evidence.length : 0,
+          success: true,
+          completedAt: new Date().toISOString()
+        },
+        context.userId,
+        context.tenantId
+      );
 
       return {
         success: true,
@@ -156,13 +190,31 @@ class ExecutionAgent extends BaseAgent {
 
     } catch (error) {
       const executionTime = Date.now() - startTime;
-      this._updateStepStatus(stepId, 'failed', { 
-        error: error.message, 
+      this._updateStepStatus(stepId, 'failed', {
+        error: error.message,
         executionTime,
         failedAt: new Date().toISOString()
       });
-      
+
       this._notifyProgress('step_failed', { stepId, step, error: error.message, executionTime });
+
+      // Audit log step failure
+      await auditInvestigationAction(
+        context.investigationId,
+        'step_execution_failed',
+        {
+          stepId,
+          stepType: step.type,
+          stepName: step.description || step.name,
+          executionTimeMs: executionTime,
+          errorMessage: error.message,
+          errorStack: error.stack,
+          success: false,
+          failedAt: new Date().toISOString()
+        },
+        context.userId,
+        context.tenantId
+      );
 
       // Determine if step should be retried or adapted
       const shouldRetry = this._shouldRetryStep(step, error);
@@ -195,19 +247,19 @@ class ExecutionAgent extends BaseAgent {
 
     while ((executionQueue.length > 0 || this.activeSteps.size > 0) && maxIterations > 0) {
       maxIterations--;
-      
+
       // Start new steps that have no pending dependencies
-      const readySteps = executionQueue.filter(step => 
+      const readySteps = executionQueue.filter(step =>
         this._areDependenciesSatisfied(step, results)
       );
 
       // Remove ready steps from queue and start execution (respecting parallel limit)
       const stepsToStart = readySteps.slice(0, this.config.maxParallelSteps - this.activeSteps.size);
-      
+
       for (const step of stepsToStart) {
         const index = executionQueue.indexOf(step);
         executionQueue.splice(index, 1);
-        
+
         const stepPromise = this.executeStep(context, step, alertContext)
           .then(result => {
             this.activeSteps.delete(step.id);
@@ -256,7 +308,7 @@ class ExecutionAgent extends BaseAgent {
     }
 
     const completedSteps = Array.from(results.values()).filter(r => r.success).length;
-    
+
     // Check if we should adapt the plan due to failures before throwing error
     if (this._shouldAdaptPlan(results, errors)) {
       const adaptation = await this._adaptExecutionPlan(context, steps, results, errors);
@@ -265,7 +317,7 @@ class ExecutionAgent extends BaseAgent {
         console.log('Plan adapted due to high failure rate');
       }
     }
-    
+
     // If all steps failed, throw an error to trigger failure handling
     if (completedSteps === 0 && steps.length > 0) {
       throw new Error(`All ${steps.length} investigation steps failed: ${errors.map(e => e.error).join(', ')}`);
@@ -301,16 +353,16 @@ class ExecutionAgent extends BaseAgent {
     switch (strategy.action) {
       case 'retry':
         return await this._retryStep(context, step, strategy.delay);
-      
+
       case 'adapt':
         return await this._adaptStepFailure(context, step, error);
-      
+
       case 'skip':
         return this._skipStep(step, error, strategy.reason);
-      
+
       case 'escalate':
         return this._escalateStepFailure(step, error, strategy.reason);
-      
+
       default:
         throw new Error(`Unknown recovery strategy: ${strategy.action}`);
     }
@@ -345,7 +397,7 @@ class ExecutionAgent extends BaseAgent {
     this.failedSteps.clear();
     this.evidence.clear();
     this.correlations = [];
-    
+
     this.executionContext = {
       investigationId,
       plan,
@@ -365,11 +417,32 @@ class ExecutionAgent extends BaseAgent {
     for (const dataSource of dataSources) {
       try {
         const connector = await this._getConnector(context, dataSource);
+        const startTime = Date.now();
+
         const queryResult = await connector.query(query, {
           ...parameters,
           ...alertContext,
           timeout: this.config.stepTimeoutMs
         });
+
+        const endTime = Date.now();
+
+        // Audit log the API call
+        await auditApiCall(
+          context.investigationId,
+          {
+            endpoint: connector.baseUrl || dataSource,
+            method: 'QUERY',
+            requestBody: { query, parameters: { ...parameters, ...alertContext } },
+            responseStatus: 200,
+            responseBody: queryResult,
+            durationMs: endTime - startTime,
+            dataSource,
+            queryType: step.type,
+            recordsReturned: queryResult.data ? queryResult.data.length : 0
+          },
+          context.tenantId
+        );
 
         results.push({
           dataSource,
@@ -379,12 +452,29 @@ class ExecutionAgent extends BaseAgent {
         });
 
       } catch (error) {
+        // Audit log the failed API call
+        await auditApiCall(
+          context.investigationId,
+          {
+            endpoint: dataSource,
+            method: 'QUERY',
+            requestBody: { query, parameters: { ...parameters, ...alertContext } },
+            responseStatus: 500,
+            errorMessage: error.message,
+            durationMs: 0,
+            dataSource,
+            queryType: step.type,
+            recordsReturned: 0
+          },
+          context.tenantId
+        );
+
         results.push({
           dataSource,
           success: false,
           error: error.message
         });
-        
+
         // If all data sources fail, throw error to fail the step
         if (results.length === dataSources.length && results.every(r => !r.success)) {
           throw new Error(`All data sources failed: ${results.map(r => r.error).join(', ')}`);
@@ -407,12 +497,12 @@ class ExecutionAgent extends BaseAgent {
 
     for (const entity of entities) {
       enrichedData[entity.type] = enrichedData[entity.type] || {};
-      
+
       for (const source of enrichmentSources) {
         try {
           const connector = await this._getConnector(context, source);
           const enrichment = await connector.enrich(entity.value, entity.type);
-          
+
           enrichedData[entity.type][entity.value] = {
             ...enrichedData[entity.type][entity.value],
             [source]: enrichment
@@ -447,7 +537,7 @@ class ExecutionAgent extends BaseAgent {
 
     // Get existing evidence for correlation
     const existingEvidence = Array.from(this.evidence.values()).flat();
-    
+
     // Perform correlation based on type
     switch (correlationType) {
       case 'temporal':
@@ -486,7 +576,7 @@ class ExecutionAgent extends BaseAgent {
     }
 
     const overallValid = validationResults.every(r => r.valid);
-    
+
     return {
       type: 'validate',
       valid: overallValid,
@@ -505,11 +595,11 @@ class ExecutionAgent extends BaseAgent {
   async _getConnector(context, dataSourceName) {
     const registry = connectorFramework.getRegistry();
     const connector = registry.getConnector(context.tenantId, dataSourceName);
-    
+
     if (!connector) {
       throw new Error(`Connector not found for data source: ${dataSourceName}`);
     }
-    
+
     return connector;
   }
 
@@ -533,7 +623,7 @@ class ExecutionAgent extends BaseAgent {
           errors.push('Query step requires query object');
         }
         break;
-      
+
       case 'enrich':
         if (!step.entities || !Array.isArray(step.entities)) {
           errors.push('Enrich step requires entities array');
@@ -542,13 +632,13 @@ class ExecutionAgent extends BaseAgent {
           errors.push('Enrich step requires enrichmentSources array');
         }
         break;
-      
+
       case 'correlate':
         if (!step.correlationType) {
           errors.push('Correlate step requires correlationType');
         }
         break;
-      
+
       case 'validate':
         if (!step.criteria || !Array.isArray(step.criteria)) {
           errors.push('Validate step requires criteria array');
@@ -564,7 +654,7 @@ class ExecutionAgent extends BaseAgent {
 
   _buildDependencyGraph(steps) {
     const graph = new Map();
-    
+
     for (const step of steps) {
       graph.set(step.id, {
         step,
@@ -610,10 +700,10 @@ class ExecutionAgent extends BaseAgent {
   async _adaptExecutionPlan(context, originalSteps, results, errors) {
     // Analyze failures to determine adaptation strategy
     const failureAnalysis = this._analyzeFailures(errors);
-    
+
     // Generate alternative steps for failed ones
     const adaptedSteps = [];
-    
+
     for (const error of errors) {
       const originalStep = originalSteps.find(s => s.id === error.stepId);
       if (originalStep) {
@@ -638,10 +728,10 @@ class ExecutionAgent extends BaseAgent {
 
   async _correlateEvidence(context) {
     const allEvidence = this._getCollectedEvidence();
-    
+
     // Perform temporal correlation
     const temporalCorrelations = this._performTemporalCorrelation(
-      allEvidence, 
+      allEvidence,
       this.config.evidenceCorrelationWindow
     );
 
@@ -668,7 +758,7 @@ class ExecutionAgent extends BaseAgent {
       if (item.timestamp) {
         const timestamp = new Date(item.timestamp).getTime();
         const windowStart = Math.floor(timestamp / timeWindow) * timeWindow;
-        
+
         if (!timeGroups.has(windowStart)) {
           timeGroups.set(windowStart, []);
         }
@@ -687,7 +777,7 @@ class ExecutionAgent extends BaseAgent {
           },
           entities: items.map(i => i.entities || []).flat(),
           confidence: this._calculateTemporalConfidence(items),
-          description: `${items.length} events occurred within ${timeWindow/1000}s window`,
+          description: `${items.length} events occurred within ${timeWindow / 1000}s window`,
           evidence: items
         });
       }
@@ -833,7 +923,7 @@ class ExecutionAgent extends BaseAgent {
 
   _extractUniqueEntities(evidence) {
     const entityMap = new Map();
-    
+
     for (const item of evidence) {
       const entities = item.entities || [];
       for (const entity of entities) {
@@ -846,7 +936,7 @@ class ExecutionAgent extends BaseAgent {
             evidenceCount: 0
           });
         }
-        
+
         const entityInfo = entityMap.get(key);
         entityInfo.sources.add(item.source);
         entityInfo.evidenceCount++;
@@ -881,7 +971,7 @@ class ExecutionAgent extends BaseAgent {
 
   _extractEvidenceFromQueryResults(results) {
     const evidence = [];
-    
+
     for (const result of results) {
       if (result.success && result.data) {
         // Extract evidence based on data structure
@@ -912,7 +1002,7 @@ class ExecutionAgent extends BaseAgent {
 
   _extractEvidenceFromEnrichment(enrichedData) {
     const evidence = [];
-    
+
     for (const [entityType, entities] of Object.entries(enrichedData)) {
       for (const [entityValue, enrichments] of Object.entries(entities)) {
         for (const [source, enrichment] of Object.entries(enrichments)) {
@@ -936,7 +1026,7 @@ class ExecutionAgent extends BaseAgent {
 
   _extractEntitiesFromData(data) {
     const entities = [];
-    
+
     // Common entity extraction patterns
     const patterns = {
       ip: /\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/g,
@@ -946,7 +1036,7 @@ class ExecutionAgent extends BaseAgent {
     };
 
     const text = JSON.stringify(data);
-    
+
     for (const [type, pattern] of Object.entries(patterns)) {
       const matches = text.match(pattern);
       if (matches) {
@@ -970,7 +1060,7 @@ class ExecutionAgent extends BaseAgent {
 
   async _validateCriterion(criterion, evidence) {
     const { type, condition, threshold } = criterion;
-    
+
     switch (type) {
       case 'evidence_count':
         const count = evidence.length;
@@ -981,7 +1071,7 @@ class ExecutionAgent extends BaseAgent {
           actual: count,
           description: `Evidence count: ${count} (required: ${threshold})`
         };
-      
+
       case 'confidence_threshold':
         const avgConfidence = evidence
           .filter(e => e.confidence !== undefined)
@@ -993,11 +1083,11 @@ class ExecutionAgent extends BaseAgent {
           actual: avgConfidence,
           description: `Average confidence: ${avgConfidence.toFixed(2)} (required: ${threshold})`
         };
-      
+
       case 'entity_presence':
-        const hasEntity = evidence.some(e => 
-          e.entities && e.entities.some(entity => 
-            entity.type === condition.entityType && 
+        const hasEntity = evidence.some(e =>
+          e.entities && e.entities.some(entity =>
+            entity.type === condition.entityType &&
             entity.value === condition.entityValue
           )
         );
@@ -1008,7 +1098,7 @@ class ExecutionAgent extends BaseAgent {
           actual: hasEntity,
           description: `Entity ${condition.entityType}:${condition.entityValue} ${hasEntity ? 'found' : 'not found'}`
         };
-      
+
       default:
         return {
           valid: false,
@@ -1057,9 +1147,9 @@ class ExecutionAgent extends BaseAgent {
     }
 
     const currentRetryCount = this.failedSteps.get(step.id)?.retryCount || 0;
-    this.failedSteps.set(step.id, { 
-      ...this.failedSteps.get(step.id), 
-      retryCount: currentRetryCount + 1 
+    this.failedSteps.set(step.id, {
+      ...this.failedSteps.get(step.id),
+      retryCount: currentRetryCount + 1
     });
 
     return { action: 'retry', retryCount: currentRetryCount + 1 };
@@ -1068,7 +1158,7 @@ class ExecutionAgent extends BaseAgent {
   async _adaptStepFailure(context, step, error) {
     // Generate alternative approaches for the failed step
     const alternatives = await this._generateAlternativeSteps(context, step, error);
-    
+
     return {
       action: 'adapt',
       originalStep: step.id,
@@ -1098,14 +1188,14 @@ class ExecutionAgent extends BaseAgent {
 
   _classifyFailure(error) {
     const message = error.message.toLowerCase();
-    
+
     if (message.includes('timeout')) return 'timeout';
     if (message.includes('rate limit')) return 'rate_limit';
     if (message.includes('authentication')) return 'auth_failure';
     if (message.includes('not found')) return 'not_found';
     if (message.includes('network')) return 'network_error';
     if (message.includes('permission')) return 'permission_denied';
-    
+
     return 'unknown';
   }
 
@@ -1114,22 +1204,22 @@ class ExecutionAgent extends BaseAgent {
     switch (failureType) {
       case 'timeout':
       case 'network_error':
-        return retryCount < 2 ? 
+        return retryCount < 2 ?
           { action: 'retry', delay: 1000 * Math.pow(2, retryCount) } :
           { action: 'adapt', reason: 'Max retries exceeded for network issue' };
-      
+
       case 'rate_limit':
         return retryCount < 1 ?
           { action: 'retry', delay: 5000 } :
           { action: 'skip', reason: 'Rate limit exceeded, skipping step' };
-      
+
       case 'auth_failure':
       case 'permission_denied':
         return { action: 'escalate', reason: 'Authentication/permission issue requires intervention' };
-      
+
       case 'not_found':
         return { action: 'adapt', reason: 'Resource not found, trying alternative approach' };
-      
+
       default:
         return retryCount < 1 ?
           { action: 'retry', delay: 1000 } :
@@ -1139,7 +1229,7 @@ class ExecutionAgent extends BaseAgent {
 
   async _generateAlternativeSteps(context, originalStep, error) {
     const alternatives = [];
-    
+
     switch (originalStep.type) {
       case 'query':
         // Try alternative data sources
@@ -1148,7 +1238,7 @@ class ExecutionAgent extends BaseAgent {
         const alternativeSources = availableSources.filter(
           source => !originalSources.includes(source)
         );
-        
+
         if (alternativeSources.length > 0) {
           alternatives.push({
             ...originalStep,
@@ -1158,14 +1248,14 @@ class ExecutionAgent extends BaseAgent {
           });
         }
         break;
-      
+
       case 'enrich':
         // Try alternative enrichment sources
         const originalEnrichmentSources = originalStep.enrichmentSources || [];
         const altEnrichmentSources = ['virustotal', 'threatintel', 'osint'].filter(
           source => !originalEnrichmentSources.includes(source)
         );
-        
+
         if (altEnrichmentSources.length > 0) {
           alternatives.push({
             ...originalStep,
@@ -1195,11 +1285,11 @@ class ExecutionAgent extends BaseAgent {
   _analyzeFailures(errors) {
     const failureTypes = {};
     const failedDataSources = new Set();
-    
+
     for (const error of errors) {
       const type = this._classifyFailure(new Error(error.error));
       failureTypes[type] = (failureTypes[type] || 0) + 1;
-      
+
       // Extract data source from error context if available
       if (error.dataSource) {
         failedDataSources.add(error.dataSource);
@@ -1216,19 +1306,19 @@ class ExecutionAgent extends BaseAgent {
 
   _generateFailureRecommendations(failureTypes, failedDataSources) {
     const recommendations = [];
-    
+
     if (failureTypes.auth_failure > 0) {
       recommendations.push('Check authentication credentials for data sources');
     }
-    
+
     if (failureTypes.rate_limit > 0) {
       recommendations.push('Consider implementing request throttling or upgrading API limits');
     }
-    
+
     if (failureTypes.network_error > 0) {
       recommendations.push('Check network connectivity to external services');
     }
-    
+
     if (failedDataSources.size > 0) {
       recommendations.push(`Review configuration for: ${Array.from(failedDataSources).join(', ')}`);
     }
@@ -1287,7 +1377,7 @@ class ExecutionAgent extends BaseAgent {
   _cleanupExecution(investigationId) {
     // Clean up execution state immediately for tests
     this.activeSteps.clear();
-    
+
     // In test environment, clean up immediately
     if (process.env.NODE_ENV === 'test') {
       this.completedSteps.clear();

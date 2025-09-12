@@ -1738,6 +1738,9 @@ app.use('/investigations', authMiddleware, require('./investigation/api'));
 // Compliance and Audit API routes
 app.use('/compliance', authMiddleware, require('./audit/api'));
 
+// Performance Monitoring API routes
+app.use('/performance', authMiddleware, require('./performance/api'));
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

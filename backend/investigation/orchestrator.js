@@ -1,5 +1,6 @@
 const { pool } = require('../database');
 const { auditLog, auditInvestigationAction, generateTraceId } = require('../middleware/audit');
+const { performanceManager } = require('../performance');
 
 /**
  * Investigation Orchestrator - Central coordinator for investigation lifecycle
@@ -13,6 +14,12 @@ class InvestigationOrchestrator {
     this.investigationQueue = [];
     this.maxConcurrentInvestigations = parseInt(process.env.MAX_CONCURRENT_INVESTIGATIONS || '10', 10);
     this.defaultTimeoutMs = parseInt(process.env.INVESTIGATION_TIMEOUT_MS || '1800000', 10); // 30 minutes
+    this.performanceEnabled = process.env.ENABLE_PERFORMANCE_MONITORING !== 'false';
+    
+    // Initialize performance manager if enabled
+    if (this.performanceEnabled) {
+      this._initializePerformanceManager();
+    }
   }
 
   /**
@@ -117,8 +124,29 @@ class InvestigationOrchestrator {
       tenantId
     });
 
-    // Queue for processing
-    this._queueInvestigation(investigationId, priority);
+    // Queue for processing with performance monitoring
+    if (this.performanceEnabled) {
+      try {
+        const performanceEntry = await performanceManager.startInvestigation({
+          investigationId,
+          alertId,
+          tenantId,
+          userId,
+          priority,
+          alertSeverity: alert.severity,
+          timeoutMs
+        });
+        
+        // Update investigation record with performance info
+        investigationRecord.performanceTracking = performanceEntry.performanceTracking;
+      } catch (error) {
+        console.error(`Failed to start performance monitoring for ${investigationId}:`, error);
+        // Continue without performance monitoring
+        this._queueInvestigation(investigationId, priority);
+      }
+    } else {
+      this._queueInvestigation(investigationId, priority);
+    }
 
     return investigationRecord;
   }
@@ -414,10 +442,123 @@ class InvestigationOrchestrator {
 
     this.activeInvestigations.delete(investigationId);
 
+    // Record performance metrics for expired investigation
+    if (this.performanceEnabled) {
+      try {
+        await performanceManager.failInvestigation(investigationId, new Error('Investigation expired'));
+      } catch (error) {
+        console.error(`Failed to record performance metrics for expired investigation ${investigationId}:`, error);
+      }
+    }
+
     await auditLog(null, 'investigation_expired', {
       investigationId,
       tenantId
     });
+  }
+
+  /**
+   * Complete investigation with performance tracking
+   * @param {string} investigationId - Investigation ID
+   * @param {Object} result - Investigation result
+   */
+  async completeInvestigation(investigationId, result) {
+    const investigation = this.activeInvestigations.get(investigationId);
+    if (!investigation) {
+      throw new Error(`Investigation ${investigationId} not found in active investigations`);
+    }
+
+    try {
+      // Update database status
+      await pool.query(
+        'UPDATE investigations SET status = $1, completed_at = NOW(), updated_at = NOW() WHERE id = $2',
+        ['complete', investigationId]
+      );
+
+      // Record performance metrics
+      if (this.performanceEnabled) {
+        await performanceManager.completeInvestigation(investigationId, result);
+      }
+
+      // Remove from active investigations
+      this.activeInvestigations.delete(investigationId);
+
+      // Log completion
+      await auditInvestigationAction(
+        investigationId,
+        'investigation_completed',
+        {
+          result,
+          duration: Date.now() - investigation.startTime.getTime(),
+          traceId: generateTraceId()
+        },
+        investigation.user_id,
+        investigation.tenant_id
+      );
+
+      console.log(`Investigation ${investigationId} completed successfully`);
+
+    } catch (error) {
+      console.error(`Failed to complete investigation ${investigationId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get performance status for all investigations
+   * @param {string} tenantId - Optional tenant filter
+   * @returns {Object} Performance status
+   */
+  getPerformanceStatus(tenantId = null) {
+    if (!this.performanceEnabled) {
+      return { enabled: false };
+    }
+
+    try {
+      return performanceManager.getPerformanceStatus(tenantId);
+    } catch (error) {
+      console.error('Failed to get performance status:', error);
+      return { error: error.message };
+    }
+  }
+
+  /**
+   * Get performance analytics
+   * @param {string} tenantId - Tenant ID
+   * @param {number} days - Number of days to analyze
+   * @returns {Promise<Object>} Performance analytics
+   */
+  async getPerformanceAnalytics(tenantId, days = 7) {
+    if (!this.performanceEnabled) {
+      throw new Error('Performance monitoring is not enabled');
+    }
+
+    return performanceManager.getPerformanceAnalytics(tenantId, days);
+  }
+
+  /**
+   * Optimize investigation performance
+   * @param {Object} options - Optimization options
+   * @returns {Promise<Object>} Optimization results
+   */
+  async optimizePerformance(options = {}) {
+    if (!this.performanceEnabled) {
+      throw new Error('Performance monitoring is not enabled');
+    }
+
+    return performanceManager.optimizePerformance(options);
+  }
+
+  // Private methods
+
+  async _initializePerformanceManager() {
+    try {
+      await performanceManager.initialize();
+      console.log('Performance monitoring enabled for Investigation Orchestrator');
+    } catch (error) {
+      console.error('Failed to initialize performance manager:', error);
+      this.performanceEnabled = false;
+    }
   }
 }
 

@@ -594,6 +594,88 @@ async function initDatabase() {
     await pool.query('CREATE INDEX IF NOT EXISTS idx_ai_decision_logs_investigation ON ai_decision_logs (investigation_id, timestamp)');
     await pool.query('CREATE INDEX IF NOT EXISTS idx_ai_decision_logs_tenant ON ai_decision_logs (tenant_id, timestamp)');
 
+    // Performance Optimization tables
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS investigation_performance_metrics (
+        id SERIAL PRIMARY KEY,
+        investigation_id VARCHAR(100) NOT NULL,
+        tenant_id INTEGER NOT NULL DEFAULT ${tenantDefaultExpr} REFERENCES tenants(id) ON DELETE CASCADE,
+        duration_ms INTEGER NOT NULL,
+        status VARCHAR(30) NOT NULL,
+        verdict VARCHAR(50),
+        confidence REAL,
+        steps_completed INTEGER DEFAULT 0,
+        total_steps INTEGER DEFAULT 0,
+        memory_delta_mb INTEGER DEFAULT 0,
+        cpu_delta_ms INTEGER DEFAULT 0,
+        agent_metrics JSONB DEFAULT '{}',
+        api_call_metrics JSONB DEFAULT '[]',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_investigation_performance_metrics_investigation ON investigation_performance_metrics (investigation_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_investigation_performance_metrics_tenant ON investigation_performance_metrics (tenant_id, created_at)');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS investigation_partial_metrics (
+        investigation_id VARCHAR(100) PRIMARY KEY,
+        tenant_id INTEGER NOT NULL DEFAULT ${tenantDefaultExpr} REFERENCES tenants(id) ON DELETE CASCADE,
+        elapsed_ms INTEGER NOT NULL,
+        agent_metrics JSONB DEFAULT '{}',
+        api_call_metrics JSONB DEFAULT '[]',
+        memory_usage_mb INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS api_performance_metrics (
+        id SERIAL PRIMARY KEY,
+        investigation_id VARCHAR(100) NOT NULL,
+        endpoint VARCHAR(500) NOT NULL,
+        method VARCHAR(10) NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        status_code INTEGER,
+        data_source VARCHAR(100),
+        records_returned INTEGER DEFAULT 0,
+        error_message TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_api_performance_metrics_investigation ON api_performance_metrics (investigation_id, created_at)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_api_performance_metrics_endpoint ON api_performance_metrics (endpoint, created_at)');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS investigation_queue (
+        id SERIAL PRIMARY KEY,
+        investigation_id VARCHAR(100) UNIQUE NOT NULL,
+        alert_id INTEGER NOT NULL,
+        tenant_id INTEGER NOT NULL DEFAULT ${tenantDefaultExpr} REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        priority INTEGER NOT NULL,
+        alert_severity VARCHAR(20),
+        estimated_duration_ms INTEGER,
+        status VARCHAR(20) DEFAULT 'queued',
+        queued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        started_at TIMESTAMP,
+        completed_at TIMESTAMP,
+        failed_at TIMESTAMP,
+        removed_at TIMESTAMP,
+        duration_ms INTEGER,
+        attempts INTEGER DEFAULT 0,
+        max_attempts INTEGER DEFAULT 3,
+        error_message TEXT,
+        removal_reason VARCHAR(100),
+        result JSONB,
+        metadata JSONB DEFAULT '{}'
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_investigation_queue_status ON investigation_queue (status, priority DESC, queued_at)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_investigation_queue_tenant ON investigation_queue (tenant_id, status)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_investigation_queue_priority ON investigation_queue (priority DESC, queued_at)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_ai_decision_logs_investigation ON ai_decision_logs (investigation_id, timestamp)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_ai_decision_logs_tenant ON ai_decision_logs (tenant_id, timestamp)');
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS human_modification_logs (
         id SERIAL PRIMARY KEY,

@@ -1732,6 +1732,9 @@ app.post('/cases', authMiddleware, async (req, res) => {
   }
 });
 
+// Investigation Engine API routes
+app.use('/investigations', authMiddleware, require('./investigation/api'));
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

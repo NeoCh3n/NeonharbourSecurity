@@ -84,7 +84,19 @@ Rules: 1) Do not include prose or backticks. 2) JSON only. 3) If evidence strong
   return plan;
 }
 
+/**
+ * @deprecated Use ResponseAgent from investigation/agents/response-agent.js instead
+ * This function provides basic recommendations but lacks the sophisticated
+ * analysis, approval workflow, and rollback procedures of the ResponseAgent.
+ * 
+ * For new implementations, use:
+ * const { ResponseAgent } = require('../investigation/agents/response-agent');
+ * const agent = new ResponseAgent('response-agent');
+ * const result = await agent.execute(context, input);
+ */
 function generateRecommendations(unified) {
+  console.warn('generateRecommendations is deprecated. Use ResponseAgent instead.');
+  
   const sev = (unified.severity || 'low').toLowerCase();
   const recs = [];
   if (unified?.src?.ip) recs.push({ id: 'block_ip', title: `Block source IP ${unified.src.ip}`, risk: 'low' });
@@ -107,4 +119,69 @@ function generateRecommendations(unified) {
   return recs;
 }
 
-module.exports = { generatePlan, generateRecommendations };
+module.exports = { generatePlan, generateRecommendations, generateAdvancedRecommendations };
+
+/**
+ * Generate advanced response recommendations using the ResponseAgent
+ * This is the recommended approach for generating response recommendations
+ * 
+ * @param {Object} unified - Normalized alert data
+ * @param {Object} verdict - Investigation verdict
+ * @param {Object} context - Investigation context
+ * @returns {Promise<Object>} Response recommendations with approval workflow
+ */
+async function generateAdvancedRecommendations(unified, verdict, context = {}) {
+  try {
+    const { ResponseAgent } = require('../investigation/agents/response-agent');
+    
+    const responseAgent = new ResponseAgent('planning-response-agent');
+    
+    const input = {
+      verdict: verdict || {
+        classification: 'requires_review',
+        confidence: 0.5,
+        riskScore: 50,
+        reasoning: 'Initial assessment based on alert data'
+      },
+      alert: unified,
+      evidence: [],
+      policies: context.policies || []
+    };
+    
+    const investigationContext = {
+      investigationId: context.investigationId || `temp-${Date.now()}`,
+      tenantId: context.tenantId || 'default',
+      businessContext: context.businessContext || {}
+    };
+    
+    const result = await responseAgent.execute(investigationContext, input);
+    
+    return {
+      success: true,
+      recommendations: result.recommendations,
+      impactAnalysis: result.impactAnalysis,
+      executionPlan: result.executionPlan,
+      approvalRequests: result.approvalRequests,
+      metadata: result.metadata
+    };
+    
+  } catch (error) {
+    console.error('Advanced recommendation generation failed:', error.message);
+    
+    // Fallback to basic recommendations
+    const basicRecs = generateRecommendations(unified);
+    return {
+      success: false,
+      error: error.message,
+      recommendations: basicRecs.map(rec => ({
+        ...rec,
+        action: rec.id,
+        description: rec.title,
+        priority: rec.risk === 'high' ? 'high' : 'medium',
+        requiresApproval: rec.risk !== 'low',
+        autoExecutable: rec.risk === 'low'
+      })),
+      fallback: true
+    };
+  }
+}

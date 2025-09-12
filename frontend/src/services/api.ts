@@ -251,4 +251,58 @@ export const casesApi = {
   summarize: (id: number) => apiRequest(`/cases/${id}/summarize`, { method: 'POST' }),
 };
 
+// Investigation API
+export const investigationsApi = {
+  list: (params?: { 
+    status?: string; 
+    priority?: number; 
+    limit?: number; 
+    offset?: number;
+    alertId?: number;
+    caseId?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.priority) qs.set('priority', String(params.priority));
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    if (params?.alertId) qs.set('alertId', String(params.alertId));
+    if (params?.caseId) qs.set('caseId', String(params.caseId));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return apiRequest(`/investigations${suffix}`);
+  },
+
+  start: (alertId: number, options?: { priority?: number; timeoutMs?: number }) =>
+    apiRequest('/investigations/start', {
+      method: 'POST',
+      body: JSON.stringify({ alertId, ...options }),
+    }),
+
+  getStatus: (id: string) => apiRequest(`/investigations/${id}/status`),
+
+  getTimeline: (id: string) => apiRequest(`/investigations/${id}/timeline`),
+
+  addFeedback: (id: string, feedback: any) =>
+    apiRequest(`/investigations/${id}/feedback`, {
+      method: 'POST',
+      body: JSON.stringify(feedback),
+    }),
+
+  pause: (id: string) =>
+    apiRequest(`/investigations/${id}/pause`, {
+      method: 'POST',
+    }),
+
+  resume: (id: string) =>
+    apiRequest(`/investigations/${id}/resume`, {
+      method: 'POST',
+    }),
+
+  getReport: (id: string, format = 'json') =>
+    apiRequest(`/investigations/${id}/report?format=${format}`),
+
+  getStats: (timeframe = '7d') =>
+    apiRequest(`/investigations/stats?timeframe=${timeframe}`),
+};
+
 export default apiRequest;

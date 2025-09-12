@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import apiRequest from '../services/api';
 
 type Counts = {
   approvalsPending: number;
@@ -16,13 +17,7 @@ type NavCountsState = Counts & {
 };
 
 async function fetchCounts(): Promise<Counts> {
-  const base = (import.meta as any).env.VITE_API_BASE_URL || '/api';
-  let token: string | null = null;
-  try { token = await ((window as any).Clerk?.session?.getToken?.()); } catch {}
-  if (!token) token = localStorage.getItem('token');
-  const r = await fetch(`${base}/nav/counts`, { headers: token ? { Authorization: `Bearer ${token}` } as any : {} });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
+  return apiRequest('/nav/counts');
 }
 
 export const useNavCounts = create<NavCountsState>((set, get) => ({

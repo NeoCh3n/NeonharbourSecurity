@@ -26,8 +26,8 @@ import AdminSettingsPage from './pages/AdminSettings.tsx';
 import { ThemeProvider } from './store/theme';
 import { worker } from './mocks/browser';
 
-// Start MSW in development
-if (import.meta.env.DEV) {
+// Optional MSW mocking (enable by setting VITE_ENABLE_MSW=true)
+if (import.meta.env.DEV && String(import.meta.env.VITE_ENABLE_MSW).toLowerCase() === 'true') {
   void worker.start({ onUnhandledRequest: 'bypass' });
 }
 

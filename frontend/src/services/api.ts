@@ -9,6 +9,10 @@ export class ApiError extends Error {
   }
 }
 
+function isDev() {
+  return typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.DEV;
+}
+
 async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
   let token: string | null = null;
   try {
@@ -37,6 +41,11 @@ async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<
   try {
     const response = await fetch(`${API_BASE}${endpoint}`, config);
     if (!response.ok) {
+      // Development fallback mocks to avoid 404 during UI work
+      if (response.status === 404 && isDev()) {
+        const mock = await tryDevMock(endpoint, options);
+        if (mock !== undefined) return mock;
+      }
       let errorMessage = `HTTP error ${response.status}`;
       try {
         const errorData = await response.json();
@@ -54,6 +63,72 @@ async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<
     if (error instanceof ApiError) throw error;
     throw new ApiError('Network error', 0);
   }
+}
+
+async function tryDevMock(endpoint: string, options: RequestInit): Promise<any | undefined> {
+  // Normalize path only (strip base if any)
+  const p0 = endpoint.startsWith('http') ? new URL(endpoint).pathname : endpoint;
+  const path = p0.split('?')[0];
+  const method = (options.method || 'GET').toUpperCase();
+
+  const ok = (data: any) => Promise.resolve(data);
+
+  if (path === '/nav/counts' && method === 'GET') {
+    return ok({ approvalsPending: 0, casesOpen: 0, triageTotal: 0, triageUnassigned: 0, triageAssignedToMe: 0 });
+  }
+  if (path === '/metrics' && method === 'GET') {
+    return ok({ totalAlerts: 0, backlogCount: 0, mttiSec: 0, mttrSec: 0, investigatedCount: 0, resolvedCount: 0 });
+  }
+  if ((path === '/alerts' || path === '/alerts/queue') && method === 'GET') {
+    return ok({ alerts: [] });
+  }
+  if (path === '/admin/settings/llm' && method === 'GET') {
+    return ok({ provider: 'deepseek' });
+  }
+  if (path === '/admin/settings/register' && method === 'GET') {
+    return ok({ allowSelfRegister: true });
+  }
+  if (path === '/admin/settings/llm' && method === 'POST') {
+    return ok({ ok: true });
+  }
+  if (path === '/admin/settings/register' && method === 'POST') {
+    return ok({ ok: true });
+  }
+  if (path === '/alerts/auto-triage' && method === 'POST') {
+    return ok({ success: true, updated: 0 });
+  }
+  if (path === '/cases' && method === 'GET') {
+    return ok({ cases: [] });
+  }
+  if (/^\/cases\/\d+\/brief$/.test(path) && method === 'POST') {
+    try {
+      const body = options.body ? JSON.parse(options.body as any) : {};
+      return ok({ brief: body?.brief || '' });
+    } catch {
+      return ok({ brief: '' });
+    }
+  }
+  if (path === '/integrations' && method === 'GET') {
+    return ok({ integrations: [] });
+  }
+  if (path === '/integrations' && method === 'POST') {
+    return ok({ ok: true });
+  }
+  if (path === '/policies' && method === 'GET') {
+    return ok({ policies: [] });
+  }
+  if (path === '/approvals' && method === 'GET') {
+    return ok({ approvals: [] });
+  }
+  if (/^\/approvals\/\d+\/approve$/.test(path) && method === 'POST') {
+    return ok({ ok: true });
+  }
+  if (/^\/approvals\/\d+\/deny$/.test(path) && method === 'POST') {
+    return ok({ ok: true });
+  }
+
+  // No dev mock
+  return undefined;
 }
 
 export const authApi = {

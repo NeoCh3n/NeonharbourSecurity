@@ -12,7 +12,11 @@ export default function LoginPage() {
   const [redirecting, setRedirecting] = useState<string | null>(null);
   const navigate = useNavigate();
   const { login, register, loading, refresh } = useAuth();
-  const API_BASE = useMemo(() => ((import.meta as any).env.VITE_API_BASE_URL || '/api') as string, []);
+  const API_BASE = useMemo(() => {
+    const envBase = (import.meta as any)?.env?.VITE_API_BASE_URL as string | undefined;
+    const isDev = !!((import.meta as any)?.env?.DEV);
+    return isDev ? (envBase || '/api') : '/api';
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

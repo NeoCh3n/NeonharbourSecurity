@@ -2,6 +2,7 @@ const express = require('express');
 const { InvestigationOrchestrator } = require('./orchestrator');
 const { auditLog } = require('../middleware/audit');
 const { pool } = require('../database');
+const { agentCommunication } = require('./agents/agent-communication');
 
 const router = express.Router();
 const orchestrator = new InvestigationOrchestrator();
@@ -84,6 +85,35 @@ router.get('/:id/timeline', async (req, res) => {
   } catch (error) {
     console.error('Failed to get investigation timeline:', error);
     res.status(404).json({ error: error.message });
+  }
+});
+
+/**
+ * Live agent/event feed (polling-friendly)
+ * GET /investigations/:id/events?since=<ISO8601>&limit=100
+ */
+router.get('/:id/events', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { since, limit = 100 } = req.query;
+
+    // Ensure investigation exists and belongs to tenant
+    const exists = await pool.query('SELECT id FROM investigations WHERE id=$1 AND tenant_id=$2', [id, req.tenantId]);
+    if (exists.rows.length === 0) {
+      return res.status(404).json({ error: 'Investigation not found' });
+    }
+
+    const events = agentCommunication.getMessageHistory(id, { limit: parseInt(limit, 10) });
+    const filtered = since
+      ? events.filter(e => {
+          try { return new Date(e.timestamp) > new Date(since); } catch { return true; }
+        })
+      : events;
+
+    res.json({ events: filtered });
+  } catch (error) {
+    console.error('Failed to get investigation events:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

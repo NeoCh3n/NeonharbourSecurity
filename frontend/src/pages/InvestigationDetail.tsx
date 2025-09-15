@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { investigationsApi } from '../services/api';
+import LiveAgentFeed from '../components/investigations/LiveAgentFeed';
 
 type TimelineStep = {
   id: string;
@@ -272,6 +273,9 @@ export default function InvestigationDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Live Agent Feed */}
+      <LiveAgentFeed investigationId={id} />
 
       {/* Investigation Timeline */}
       <div className="bg-surface rounded-lg border border-border">

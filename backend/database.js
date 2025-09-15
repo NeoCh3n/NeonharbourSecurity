@@ -10,7 +10,7 @@ async function initDatabase() {
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
+        id SERIAL,
         email VARCHAR(255) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
         is_admin BOOLEAN DEFAULT false,
@@ -23,7 +23,7 @@ async function initDatabase() {
     // Multi-tenancy core tables
     await pool.query(`
       CREATE TABLE IF NOT EXISTS tenants (
-        id SERIAL PRIMARY KEY,
+        id SERIAL,
         slug VARCHAR(50) UNIQUE NOT NULL,
         name VARCHAR(100) NOT NULL,
         region VARCHAR(50),
@@ -946,10 +946,13 @@ async function initDatabase() {
       }
     };
 
+    // Create partitioned audit_logs without a primary key to satisfy
+    // PostgreSQL requirement that unique/primary keys include the
+    // partition key (created_at). We don't need a PK for append-only logs.
     await ensurePartitionedEmptyCreate(
       'audit_logs',
       `
-        id SERIAL PRIMARY KEY,
+        id SERIAL,
         action VARCHAR(100) NOT NULL,
         user_id INTEGER REFERENCES users(id),
         details JSONB,
@@ -959,10 +962,13 @@ async function initDatabase() {
       `,
       [ 'CREATE INDEX IF NOT EXISTS idx_audit_tenant_created ON audit_logs (tenant_id, created_at)' ]
     );
+    // Create partitioned alerts table without pgvector dependency by default.
+    // If pgvector is available, the optional embedding_vec column and index
+    // are added separately in the guarded block above.
     await ensurePartitionedEmptyCreate(
       'alerts',
       `
-        id SERIAL PRIMARY KEY,
+        id SERIAL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         source VARCHAR(100),
         status VARCHAR(20) DEFAULT 'new',
@@ -993,7 +999,6 @@ async function initDatabase() {
         feedback VARCHAR(100),
         user_id INTEGER REFERENCES users(id),
         tenant_id INTEGER NOT NULL DEFAULT ${tenantDefaultExpr} REFERENCES tenants(id) ON DELETE CASCADE,
-        embedding_vec vector(64),
         assigned_to INTEGER REFERENCES users(id),
         priority VARCHAR(20),
         tags TEXT[],
@@ -1005,8 +1010,8 @@ async function initDatabase() {
         'CREATE INDEX IF NOT EXISTS idx_alerts_fingerprint ON alerts (fingerprint)',
         'CREATE INDEX IF NOT EXISTS idx_alerts_case_id ON alerts (case_id)',
         'CREATE INDEX IF NOT EXISTS idx_alerts_tenant_created_at ON alerts (tenant_id, created_at)',
-        'CREATE INDEX IF NOT EXISTS idx_alerts_tenant_status ON alerts (tenant_id, status)',
-        'CREATE INDEX IF NOT EXISTS idx_alerts_embedding_vec ON alerts USING ivfflat (embedding_vec vector_l2_ops) WITH (lists = 50)'
+        'CREATE INDEX IF NOT EXISTS idx_alerts_tenant_status ON alerts (tenant_id, status)'
+        // embedding_vec index (ivfflat) is added conditionally where pgvector exists
       ]
     );
 

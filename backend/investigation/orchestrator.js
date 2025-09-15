@@ -1,6 +1,7 @@
 const { pool } = require('../database');
 const { auditLog, auditInvestigationAction, generateTraceId } = require('../middleware/audit');
 const { performanceManager } = require('../performance');
+const { agentCommunication } = require('./agents/agent-communication');
 
 /**
  * Investigation Orchestrator - Central coordinator for investigation lifecycle
@@ -116,6 +117,9 @@ class InvestigationOrchestrator {
       stepHistory: []
     });
 
+    // Broadcast initial status
+    try { agentCommunication.broadcastSystemMessage(investigationId, 'status_update', { status: 'planning' }); } catch {}
+
     // Log investigation start
     await auditLog(userId, 'investigation_started', {
       investigationId,
@@ -223,6 +227,7 @@ class InvestigationOrchestrator {
       userId,
       tenantId
     );
+    try { agentCommunication.broadcastSystemMessage(investigationId, 'status_update', { status: 'paused' }); } catch {}
   }
 
   /**
@@ -264,6 +269,7 @@ class InvestigationOrchestrator {
       userId,
       tenantId
     );
+    try { agentCommunication.broadcastSystemMessage(investigationId, 'status_update', { status: 'executing' }); } catch {}
   }
 
   /**
@@ -416,6 +422,7 @@ class InvestigationOrchestrator {
         ['executing', investigationId]
       );
       investigation.status = 'executing';
+      try { agentCommunication.broadcastSystemMessage(investigationId, 'status_update', { status: 'executing' }); } catch {}
 
       console.log(`Started processing investigation: ${investigationId}`);
       
@@ -431,6 +438,7 @@ class InvestigationOrchestrator {
         ['failed', investigationId]
       );
       investigation.status = 'failed';
+      try { agentCommunication.broadcastSystemMessage(investigationId, 'status_update', { status: 'failed' }); } catch {}
     }
   }
 
@@ -455,6 +463,7 @@ class InvestigationOrchestrator {
       investigationId,
       tenantId
     });
+    try { agentCommunication.broadcastSystemMessage(investigationId, 'status_update', { status: 'expired' }); } catch {}
   }
 
   /**
@@ -497,6 +506,7 @@ class InvestigationOrchestrator {
       );
 
       console.log(`Investigation ${investigationId} completed successfully`);
+      try { agentCommunication.broadcastSystemMessage(investigationId, 'status_update', { status: 'complete' }); } catch {}
 
     } catch (error) {
       console.error(`Failed to complete investigation ${investigationId}:`, error);

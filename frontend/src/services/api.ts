@@ -1,4 +1,14 @@
-const API_BASE: string = (import.meta as any).env.VITE_API_BASE_URL || '/api';
+function computeApiBase(): string {
+  const rawEnvBase = (import.meta as any)?.env?.VITE_API_BASE_URL as string | undefined;
+  const envBase = rawEnvBase && rawEnvBase.trim() ? rawEnvBase.trim().replace(/\/+$/, '') : undefined;
+  const isDev = !!((import.meta as any)?.env?.DEV);
+  // Always honor explicit override if provided (works in dev and prod builds)
+  if (envBase) return envBase;
+  // Default: same-origin nginx proxy at /api
+  return '/api';
+}
+
+const API_BASE: string = computeApiBase();
 
 export class ApiError extends Error {
   status: number;
@@ -15,12 +25,11 @@ function isDev() {
 
 async function apiRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
   let token: string | null = null;
-  try {
-    // Prefer Clerk session token when signed in
-    token = await ((window as any).Clerk?.session?.getToken?.());
-  } catch {}
+  // Prefer app JWT from localStorage (issued by our backend)
+  try { token = localStorage.getItem('token'); } catch {}
+  // Fallback to Clerk session token only if no app token
   if (!token) {
-    token = localStorage.getItem('token');
+    try { token = await ((window as any).Clerk?.session?.getToken?.()); } catch {}
   }
   const isFormData = options && typeof (options as any).body !== 'undefined' && (options as any).body instanceof FormData;
 
@@ -281,6 +290,14 @@ export const investigationsApi = {
   getStatus: (id: string) => apiRequest(`/investigations/${id}/status`),
 
   getTimeline: (id: string) => apiRequest(`/investigations/${id}/timeline`),
+
+  getEvents: (id: string, since?: string, limit = 100) => {
+    const qs = new URLSearchParams();
+    if (since) qs.set('since', since);
+    if (limit) qs.set('limit', String(limit));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return apiRequest(`/investigations/${id}/events${suffix}`);
+  },
 
   addFeedback: (id: string, feedback: any) =>
     apiRequest(`/investigations/${id}/feedback`, {

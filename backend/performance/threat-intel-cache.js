@@ -274,6 +274,8 @@ class ThreatIntelCache {
       await pool.query('CREATE INDEX IF NOT EXISTS idx_threat_intel_cache_tenant ON threat_intel_cache (tenant_id, cache_key)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_threat_intel_cache_expires ON threat_intel_cache (expires_at)');
       await pool.query('CREATE INDEX IF NOT EXISTS idx_threat_intel_cache_type ON threat_intel_cache (data_type, expires_at)');
+      // Ensure ON CONFLICT (cache_key, tenant_id) works by adding a unique index
+      await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS uniq_threat_intel_cache_key_tenant ON threat_intel_cache (cache_key, tenant_id)');
       
     } catch (error) {
       console.error('Failed to initialize cache table:', error);
@@ -348,7 +350,7 @@ class ThreatIntelCache {
         INSERT INTO threat_intel_cache (
           cache_key, tenant_id, data, data_type, expires_at, updated_at
         ) VALUES ($1, $2, $3, $4, $5, NOW())
-        ON CONFLICT (cache_key, COALESCE(tenant_id, 0)) DO UPDATE SET
+        ON CONFLICT (cache_key, tenant_id) DO UPDATE SET
           data = EXCLUDED.data,
           expires_at = EXCLUDED.expires_at,
           updated_at = NOW(),

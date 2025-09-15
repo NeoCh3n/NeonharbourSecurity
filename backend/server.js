@@ -186,7 +186,50 @@ async function authMiddleware(req, res, next) {
     }
     next();
   } catch (err) {
-    return res.status(401).json({ error: 'Invalid token' });
+    // Fallback: accept external IdP JWTs (e.g., Clerk) by decoding email and mapping to a local user.
+    // Controlled via ALLOW_EXTERNAL_JWT_FALLBACK (defaults to true for local/demo setups).
+    try {
+      const allow = String(process.env.ALLOW_EXTERNAL_JWT_FALLBACK ?? 'true').toLowerCase();
+      const allowed = ['1','true','yes','on'].includes(allow);
+      if (!allowed) throw new Error('external fallback disabled');
+      const decoded = decodeJwt(token) || {};
+      const maybeEmail = decoded.email || decoded.preferred_username || decoded.upn || null;
+      const subject = decoded.sub ? String(decoded.sub) : null;
+      const email = (maybeEmail || subject || '').toString();
+      if (!email) throw new Error('no email in external token');
+      const user = await ensureUserWithEmail(email.toLowerCase());
+      req.user = user;
+      // Resolve tenant as in the primary path
+      try {
+        const override = req.headers['x-tenant-id'] || req.headers['x-tenant'];
+        let desiredTenantId = override ? parseInt(String(override), 10) : null;
+        let tenantRow;
+        if (desiredTenantId && !Number.isNaN(desiredTenantId)) {
+          const check = await pool.query('SELECT tenant_id, role FROM user_tenants WHERE user_id=$1 AND tenant_id=$2', [req.user.id, desiredTenantId]);
+          if (check.rows.length) tenantRow = { id: check.rows[0].tenant_id, role: check.rows[0].role };
+        }
+        if (!tenantRow) {
+          const map = await pool.query(
+            "SELECT ut.tenant_id, ut.role FROM user_tenants ut JOIN tenants t ON t.id = ut.tenant_id WHERE ut.user_id=$1 ORDER BY CASE WHEN ut.role='admin' THEN 0 ELSE 1 END, t.id ASC",
+            [req.user.id]
+          );
+          if (map.rows.length) tenantRow = { id: map.rows[0].tenant_id, role: map.rows[0].role };
+        }
+        if (!tenantRow) {
+          const def = await pool.query("SELECT id FROM tenants WHERE slug='default' ORDER BY id ASC LIMIT 1");
+          if (def.rows.length) tenantRow = { id: def.rows[0].id, role: 'member' };
+        }
+        req.tenantId = tenantRow?.id || null;
+        req.tenantRole = tenantRow?.role || null;
+      } catch (e) {
+        console.warn('Tenant resolution error (external token):', e.message);
+        req.tenantId = null;
+        req.tenantRole = null;
+      }
+      return next();
+    } catch (e) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
   }
 }
 
@@ -1783,7 +1826,8 @@ async function startServer() {
     await initDatabase();
     // Optional background summarizer cron
     try { require('./jobs/cron').startSummarizerCron(); } catch {}
-    return app.listen(port, () => {
+    // Explicitly bind to 0.0.0.0 so other containers can reach us
+    return app.listen(port, '0.0.0.0', () => {
       console.log(`Backend listening on port ${port}`);
     });
   } catch (error) {

@@ -1,10 +1,29 @@
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: false
-});
+function buildPoolConfig() {
+  const base = { ssl: false };
+  const rawUrl = process.env.DATABASE_URL;
+  if (rawUrl && typeof rawUrl === 'string' && rawUrl.trim().length > 0) {
+    return { ...base, connectionString: rawUrl.trim() };
+  }
+
+  const port = process.env.PGPORT ? Number(process.env.PGPORT) : 5432;
+  const passwordRaw = process.env.PGPASSWORD;
+  const cfg = {
+    ...base,
+    host: process.env.PGHOST || '127.0.0.1',
+    port: Number.isFinite(port) ? port : 5432,
+    database: process.env.PGDATABASE || 'postgres',
+    user: process.env.PGUSER || 'postgres',
+  };
+  if (passwordRaw != null) {
+    cfg.password = String(passwordRaw);
+  }
+  return cfg;
+}
+
+const pool = new Pool(buildPoolConfig());
 
 async function initDatabase() {
   try {
@@ -14,11 +33,50 @@ async function initDatabase() {
         email VARCHAR(255) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
         is_admin BOOLEAN DEFAULT false,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        full_name VARCHAR(255),
+        subscription_plan VARCHAR(100),
+        subscription_status VARCHAR(50) DEFAULT 'trialing',
+        subscription_ends_at TIMESTAMP,
+        allowed_models TEXT[] DEFAULT '{}'::text[],
+        feature_flags JSONB DEFAULT '[]'::jsonb,
+        seat_limit INTEGER DEFAULT 1,
+        monthly_rate NUMERIC(12,2) DEFAULT 0,
+        billing_currency VARCHAR(10) DEFAULT 'USD',
+        last_login_at TIMESTAMP,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        customer_notes TEXT,
+        billing_reference VARCHAR(100),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
     // Ensure new columns exist on existing installations
     try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false'); } catch {}
+    try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(255)'); } catch {}
+    try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_plan VARCHAR(100)'); } catch {}
+    try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(50) DEFAULT 'trialing'"); } catch {}
+    try { await pool.query("ALTER TABLE users ALTER COLUMN subscription_status SET DEFAULT 'trialing'"); } catch {}
+    try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_ends_at TIMESTAMP'); } catch {}
+    try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS allowed_models TEXT[] DEFAULT '{}'::text[]"); } catch {}
+    try { await pool.query("ALTER TABLE users ALTER COLUMN allowed_models SET DEFAULT '{}'::text[]"); } catch {}
+    try { await pool.query("UPDATE users SET allowed_models='{}'::text[] WHERE allowed_models IS NULL"); } catch {}
+    try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS feature_flags JSONB DEFAULT '[]'::jsonb"); } catch {}
+    try { await pool.query("ALTER TABLE users ALTER COLUMN feature_flags SET DEFAULT '[]'::jsonb"); } catch {}
+    try { await pool.query("UPDATE users SET feature_flags='[]'::jsonb WHERE feature_flags IS NULL"); } catch {}
+    try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS seat_limit INTEGER DEFAULT 1"); } catch {}
+    try { await pool.query("ALTER TABLE users ALTER COLUMN seat_limit SET DEFAULT 1"); } catch {}
+    try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_rate NUMERIC(12,2) DEFAULT 0"); } catch {}
+    try { await pool.query("ALTER TABLE users ALTER COLUMN monthly_rate SET DEFAULT 0"); } catch {}
+    try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_currency VARCHAR(10) DEFAULT 'USD'"); } catch {}
+    try { await pool.query("ALTER TABLE users ALTER COLUMN billing_currency SET DEFAULT 'USD'"); } catch {}
+    try { await pool.query("UPDATE users SET billing_currency='USD' WHERE billing_currency IS NULL"); } catch {}
+    try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP'); } catch {}
+    try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb"); } catch {}
+    try { await pool.query("ALTER TABLE users ALTER COLUMN metadata SET DEFAULT '{}'::jsonb"); } catch {}
+    try { await pool.query("UPDATE users SET metadata='{}'::jsonb WHERE metadata IS NULL"); } catch {}
+    try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS customer_notes TEXT'); } catch {}
+    try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_reference VARCHAR(100)'); } catch {}
+    try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'); } catch {}
 
     // Multi-tenancy core tables
     await pool.query(`

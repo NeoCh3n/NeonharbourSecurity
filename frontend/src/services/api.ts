@@ -106,6 +106,31 @@ async function tryDevMock(endpoint: string, options: RequestInit): Promise<any |
   if (path === '/alerts/auto-triage' && method === 'POST') {
     return ok({ success: true, updated: 0 });
   }
+  if (path === '/admin/users' && method === 'GET') {
+    return ok({
+      users: [],
+      totals: {
+        totalUsers: 0,
+        activeSubscriptions: 0,
+        trialUsers: 0,
+        expiringSoon: 0,
+        activeLast30: 0,
+        seatsProvisioned: 0,
+        seatsInUse: 0,
+        monthlyRecurringRevenue: 0,
+        monthlyRecurringCurrency: 'USD'
+      },
+      revenue: { primaryCurrency: 'USD', primaryAmount: 0, breakdown: [{ currency: 'USD', amount: 0 }] },
+      planBreakdown: [],
+      statusBreakdown: [],
+      featureUsage: [],
+      modelUsage: [],
+      trend: [],
+    });
+  }
+  if (/^\/admin\/users\/.+/.test(path) && method === 'PATCH') {
+    return ok({ success: true, user: null });
+  }
   if (path === '/cases' && method === 'GET') {
     return ok({ cases: [] });
   }
@@ -217,6 +242,15 @@ export const planApi = {
 
 export const actionsApi = {
   request: (id: number, action: string, reason: string) => apiRequest(`/actions/${id}/request`, { method: 'POST', body: JSON.stringify({ action, reason }) })
+};
+
+export const adminApi = {
+  getUsers: () => apiRequest('/admin/users'),
+  updateUser: (id: number, payload: Record<string, unknown>) =>
+    apiRequest(`/admin/users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
 };
 
 export const approvalsApi = {

@@ -148,6 +148,306 @@ function parseJsonMaybe(value, fallback) {
   return fallback;
 }
 
+const ADMIN_USER_SELECT = `
+  SELECT
+    u.id,
+    u.email,
+    u.full_name,
+    u.is_admin,
+    u.created_at,
+    u.subscription_plan,
+    u.subscription_status,
+    u.subscription_ends_at,
+    u.allowed_models,
+    u.feature_flags,
+    u.seat_limit,
+    u.monthly_rate,
+    u.billing_currency,
+    u.last_login_at,
+    u.metadata,
+    u.customer_notes,
+    u.billing_reference,
+    u.updated_at,
+    (
+      SELECT json_agg(json_build_object('id', t.id, 'slug', t.slug, 'name', t.name, 'role', ut.role)
+        ORDER BY CASE WHEN ut.role='admin' THEN 0 ELSE 1 END, t.id)
+      FROM user_tenants ut
+      JOIN tenants t ON t.id = ut.tenant_id
+      WHERE ut.user_id = u.id
+    ) AS tenants,
+    (SELECT COUNT(*) FROM alerts a WHERE a.assigned_to = u.id) AS alerts_assigned,
+    (SELECT COUNT(*) FROM alerts a WHERE a.user_id = u.id) AS alerts_reported,
+    (SELECT COUNT(*) FROM cases c WHERE c.owner = u.email) AS cases_owned,
+    (SELECT COUNT(*) FROM audit_logs al WHERE al.user_id = u.id) AS audit_events
+  FROM users u
+`;
+
+const ADMIN_TREND_MONTHS = 12;
+
+function toNumber(value) {
+  if (value == null) return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const parsed = parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function roundNumber(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function normalizeAllowedModels(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return [...new Set(raw.map(v => String(v).trim()).filter(Boolean))];
+  }
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return normalizeAllowedModels(parsed);
+    } catch {}
+    return raw.split(',').map(v => v.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function normalizeFeatureFlags(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return [...new Set(raw.map(v => String(v).trim()).filter(Boolean))];
+  }
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return normalizeFeatureFlags(parsed);
+      if (parsed && typeof parsed === 'object') {
+        return Object.entries(parsed).filter(([, enabled]) => !!enabled).map(([key]) => String(key));
+      }
+    } catch {}
+    return raw.split(',').map(v => v.trim()).filter(Boolean);
+  }
+  if (typeof raw === 'object') {
+    return Object.entries(raw).filter(([, enabled]) => !!enabled).map(([key]) => String(key));
+  }
+  return [];
+}
+
+function mapAdminUserRow(row) {
+  const allowedModels = normalizeAllowedModels(row.allowed_models);
+  const featureFlags = normalizeFeatureFlags(row.feature_flags);
+  const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+  const tenantsRaw = Array.isArray(row.tenants) ? row.tenants : [];
+  const tenants = tenantsRaw
+    .map(t => ({
+      id: typeof t?.id === 'number' ? t.id : parseInt(t?.id, 10),
+      slug: t?.slug || null,
+      name: t?.name || null,
+      role: t?.role || null,
+    }))
+    .filter(t => !Number.isNaN(t.id));
+  const seatLimitRaw = row.seat_limit != null ? parseInt(row.seat_limit, 10) : 0;
+  const seatLimit = Number.isFinite(seatLimitRaw) ? Math.max(0, seatLimitRaw) : 0;
+
+  return {
+    id: row.id,
+    email: row.email,
+    fullName: row.full_name || null,
+    isAdmin: !!row.is_admin,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    subscriptionPlan: row.subscription_plan || null,
+    subscriptionStatus: row.subscription_status || 'trialing',
+    subscriptionEndsAt: row.subscription_ends_at ? new Date(row.subscription_ends_at).toISOString() : null,
+    allowedModels,
+    featureFlags,
+    seatLimit,
+    monthlyRate: roundNumber(toNumber(row.monthly_rate)),
+    billingCurrency: (row.billing_currency || 'USD').toUpperCase(),
+    lastLoginAt: row.last_login_at ? new Date(row.last_login_at).toISOString() : null,
+    metadata,
+    customerNotes: row.customer_notes || null,
+    billingReference: row.billing_reference || null,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+    usage: {
+      alertsAssigned: Number(row.alerts_assigned || 0),
+      alertsReported: Number(row.alerts_reported || 0),
+      casesOwned: Number(row.cases_owned || 0),
+      auditEvents: Number(row.audit_events || 0),
+    },
+    tenants,
+  };
+}
+
+function buildAdminTrend(users, primaryCurrency) {
+  const trend = [];
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - (ADMIN_TREND_MONTHS - 1), 1);
+  for (let i = 0; i < ADMIN_TREND_MONTHS; i += 1) {
+    const monthStart = new Date(start.getFullYear(), start.getMonth() + i, 1);
+    const nextMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
+    let newSignups = 0;
+    let activeSubs = 0;
+    let churned = 0;
+    const mrrTotals = {};
+
+    for (const user of users) {
+      const createdAt = user.createdAt ? new Date(user.createdAt) : null;
+      const endsAt = user.subscriptionEndsAt ? new Date(user.subscriptionEndsAt) : null;
+      const status = (user.subscriptionStatus || '').toLowerCase();
+      const monthly = Number(user.monthlyRate || 0);
+      const currency = user.billingCurrency || 'USD';
+      if (createdAt && createdAt >= monthStart && createdAt < nextMonth) newSignups += 1;
+
+      const revenueStatus = status === 'active' || status === 'trialing';
+      const createdBeforePeriodEnd = !createdAt || createdAt < nextMonth;
+      const endsAfterPeriodStart = !endsAt || endsAt >= monthStart;
+      if (revenueStatus && createdBeforePeriodEnd && endsAfterPeriodStart) {
+        activeSubs += 1;
+        if (monthly > 0) {
+          mrrTotals[currency] = (mrrTotals[currency] || 0) + monthly;
+        }
+      }
+      if (['canceled', 'paused', 'past_due'].includes(status) && endsAt && endsAt >= monthStart && endsAt < nextMonth) {
+        churned += 1;
+      }
+    }
+
+    const breakdown = Object.entries(mrrTotals)
+      .map(([currency, amount]) => ({ currency, amount: roundNumber(amount) }))
+      .sort((a, b) => b.amount - a.amount);
+    const primaryAmount = breakdown.find(b => b.currency === primaryCurrency)?.amount || 0;
+    trend.push({
+      month: monthStart.toISOString(),
+      label: monthStart.toLocaleString('en-US', { month: 'short', year: 'numeric' }),
+      active: activeSubs,
+      newSignups,
+      churned,
+      mrrBreakdown: breakdown,
+      mrrPrimary: primaryAmount,
+    });
+  }
+  return trend;
+}
+
+function buildAdminOverview(users, seatsUsed) {
+  const revenueTotals = {};
+  const statusCounts = {};
+  const planStats = new Map();
+  const featureCounts = {};
+  const modelCounts = {};
+  const nowTs = Date.now();
+  const thirtyDaysMs = 1000 * 60 * 60 * 24 * 30;
+
+  let activeSubscriptions = 0;
+  let trialUsers = 0;
+  let expiringSoon = 0;
+  let activeLast30 = 0;
+  let seatsProvisioned = 0;
+
+  for (const user of users) {
+    const seatLimit = Number.isFinite(Number(user.seatLimit)) ? Number(user.seatLimit) : 0;
+    seatsProvisioned += seatLimit;
+    const statusRaw = typeof user.subscriptionStatus === 'string' ? user.subscriptionStatus.trim() : '';
+    const status = statusRaw ? statusRaw.toLowerCase() : 'unknown';
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+
+    if (status === 'active') activeSubscriptions += 1;
+    if (status === 'trialing') trialUsers += 1;
+
+    if (user.subscriptionEndsAt) {
+      const endTs = new Date(user.subscriptionEndsAt).getTime();
+      if (!Number.isNaN(endTs) && endTs > nowTs && endTs <= nowTs + thirtyDaysMs) expiringSoon += 1;
+    }
+
+    if (user.lastLoginAt) {
+      const lastTs = new Date(user.lastLoginAt).getTime();
+      if (!Number.isNaN(lastTs) && nowTs - lastTs <= thirtyDaysMs) activeLast30 += 1;
+    }
+
+    const revenueStatus = status === 'active' || status === 'trialing';
+    if (revenueStatus) {
+      const rate = Number(user.monthlyRate || 0);
+      if (rate > 0) {
+        const currency = user.billingCurrency || 'USD';
+        revenueTotals[currency] = (revenueTotals[currency] || 0) + rate;
+      }
+    }
+
+    const planKeyRaw = typeof user.subscriptionPlan === 'string' ? user.subscriptionPlan.trim() : '';
+    const planKey = planKeyRaw || 'Unassigned';
+    const planEntry = planStats.get(planKey) || { plan: planKey, customers: 0, activeCustomers: 0, currencyTotals: {} };
+    planEntry.customers += 1;
+    if (revenueStatus) {
+      planEntry.activeCustomers += 1;
+      const rate = Number(user.monthlyRate || 0);
+      if (rate > 0) {
+        const currency = user.billingCurrency || 'USD';
+        planEntry.currencyTotals[currency] = (planEntry.currencyTotals[currency] || 0) + rate;
+      }
+    }
+    planStats.set(planKey, planEntry);
+
+    for (const feature of user.featureFlags || []) {
+      featureCounts[feature] = (featureCounts[feature] || 0) + 1;
+    }
+    for (const model of user.allowedModels || []) {
+      modelCounts[model] = (modelCounts[model] || 0) + 1;
+    }
+  }
+
+  const revenueBreakdown = Object.entries(revenueTotals)
+    .map(([currency, amount]) => ({ currency, amount: roundNumber(amount) }))
+    .sort((a, b) => b.amount - a.amount);
+  const primaryCurrency = revenueBreakdown.length ? revenueBreakdown[0].currency : 'USD';
+  const primaryAmount = revenueBreakdown.length ? revenueBreakdown[0].amount : 0;
+
+  const planBreakdown = [...planStats.values()].map(entry => ({
+    plan: entry.plan,
+    customers: entry.customers,
+    activeCustomers: entry.activeCustomers,
+    revenue: Object.entries(entry.currencyTotals)
+      .map(([currency, amount]) => ({ currency, amount: roundNumber(amount) }))
+      .sort((a, b) => b.amount - a.amount),
+  })).sort((a, b) => b.customers - a.customers);
+
+  const statusBreakdown = Object.entries(statusCounts)
+    .map(([status, count]) => ({ status, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const featureUsage = Object.entries(featureCounts)
+    .map(([feature, count]) => ({ feature, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const modelUsage = Object.entries(modelCounts)
+    .map(([model, count]) => ({ model, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const trend = buildAdminTrend(users, primaryCurrency);
+
+  return {
+    users,
+    totals: {
+      totalUsers: users.length,
+      activeSubscriptions,
+      trialUsers,
+      expiringSoon,
+      activeLast30,
+      seatsProvisioned,
+      seatsInUse: seatsUsed,
+      monthlyRecurringRevenue: roundNumber(primaryAmount),
+      monthlyRecurringCurrency: primaryCurrency,
+    },
+    revenue: {
+      primaryCurrency,
+      primaryAmount: roundNumber(primaryAmount),
+      breakdown: revenueBreakdown,
+    },
+    planBreakdown,
+    statusBreakdown,
+    featureUsage,
+    modelUsage,
+    trend,
+  };
+}
+
 async function authMiddleware(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth) return res.status(401).json({ error: 'No token' });
@@ -197,7 +497,15 @@ async function authMiddleware(req, res, next) {
       const subject = decoded.sub ? String(decoded.sub) : null;
       const email = (maybeEmail || subject || '').toString();
       if (!email) throw new Error('no email in external token');
-      const user = await ensureUserWithEmail(email.toLowerCase());
+      const ensured = await ensureUserWithEmail(email.toLowerCase());
+      try {
+        await pool.query('UPDATE users SET last_login_at=NOW(), updated_at=NOW() WHERE id=$1', [ensured.id]);
+      } catch {}
+      let user = ensured;
+      try {
+        const fresh = await pool.query('SELECT id, email, is_admin FROM users WHERE id=$1', [ensured.id]);
+        if (fresh.rows.length) user = fresh.rows[0];
+      } catch {}
       req.user = user;
       // Resolve tenant as in the primary path
       try {
@@ -258,6 +566,9 @@ app.post('/auth/register', async (req, res) => {
       [email, hashed, isAdmin]
     );
     const user = result.rows[0];
+    try {
+      await pool.query('UPDATE users SET last_login_at=NOW(), updated_at=NOW() WHERE id=$1', [user.id]);
+    } catch {}
     // Map user to default tenant
     try {
       const def = await pool.query("SELECT id FROM tenants WHERE slug='default' ORDER BY id ASC LIMIT 1");
@@ -283,7 +594,9 @@ app.post('/auth/login', async (req, res) => {
     const user = result.rows[0];
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(400).json({ error: 'Invalid credentials' });
-    
+    try {
+      await pool.query('UPDATE users SET last_login_at=NOW(), updated_at=NOW() WHERE id=$1', [user.id]);
+    } catch {}
     const token = generateToken(user);
     res.json({ token, isAdmin: user.is_admin });
   } catch (error) {
@@ -1281,6 +1594,147 @@ app.post('/admin/settings/register', authMiddleware, requireAdmin, async (req, r
   } catch (e) {
     console.error('Error updating register setting:', e);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/admin/users', authMiddleware, requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(`${ADMIN_USER_SELECT} ORDER BY u.created_at DESC`);
+    const seatUsage = await pool.query('SELECT COUNT(*)::int AS total FROM user_tenants');
+    const seatsUsed = seatUsage.rows[0]?.total || 0;
+    const users = result.rows.map(mapAdminUserRow);
+    const payload = buildAdminOverview(users, seatsUsed);
+    res.json(payload);
+  } catch (e) {
+    console.error('Error loading admin users:', e);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.patch('/admin/users/:id', authMiddleware, requireAdmin, async (req, res) => {
+  const userId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(userId) || userId <= 0) return res.status(400).json({ error: 'Invalid user id' });
+
+  const body = req.body || {};
+  const sets = [];
+  const values = [];
+  const changedFields = [];
+  let idx = 1;
+
+  function pushUpdate(column, value, fieldName) {
+    sets.push(`${column}=$${idx}`);
+    values.push(value);
+    changedFields.push(fieldName);
+    idx += 1;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'fullName')) {
+    const fullName = typeof body.fullName === 'string' ? body.fullName.trim() : null;
+    pushUpdate('full_name', fullName || null, 'fullName');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'isAdmin')) {
+    const desired = !!body.isAdmin;
+    if (req.user.id === userId && !desired) {
+      return res.status(400).json({ error: 'Cannot remove your own admin access' });
+    }
+    pushUpdate('is_admin', desired, 'isAdmin');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'subscriptionPlan')) {
+    const plan = typeof body.subscriptionPlan === 'string' ? body.subscriptionPlan.trim() : null;
+    pushUpdate('subscription_plan', plan || null, 'subscriptionPlan');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'subscriptionStatus')) {
+    const statusRaw = typeof body.subscriptionStatus === 'string' ? body.subscriptionStatus.trim().toLowerCase() : null;
+    if (statusRaw && !['trialing', 'active', 'past_due', 'canceled', 'paused', 'suspended'].includes(statusRaw)) {
+      return res.status(400).json({ error: 'Invalid subscription status' });
+    }
+    pushUpdate('subscription_status', statusRaw || null, 'subscriptionStatus');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'subscriptionEndsAt')) {
+    const raw = body.subscriptionEndsAt;
+    let val = null;
+    if (raw === null || raw === '') {
+      val = null;
+    } else if (raw) {
+      const date = new Date(raw);
+      if (Number.isNaN(date.getTime())) return res.status(400).json({ error: 'Invalid subscription end date' });
+      val = date.toISOString();
+    }
+    pushUpdate('subscription_ends_at', val, 'subscriptionEndsAt');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'allowedModels')) {
+    const models = normalizeAllowedModels(body.allowedModels);
+    pushUpdate('allowed_models', models, 'allowedModels');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'featureFlags')) {
+    const features = normalizeFeatureFlags(body.featureFlags);
+    pushUpdate('feature_flags', features, 'featureFlags');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'seatLimit')) {
+    const seat = parseInt(body.seatLimit, 10);
+    const seatLimit = Number.isFinite(seat) && seat > 0 ? seat : 1;
+    pushUpdate('seat_limit', seatLimit, 'seatLimit');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'monthlyRate')) {
+    const rate = parseFloat(String(body.monthlyRate));
+    const monthlyRate = Number.isFinite(rate) && rate >= 0 ? rate : 0;
+    pushUpdate('monthly_rate', monthlyRate, 'monthlyRate');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'billingCurrency')) {
+    const currency = typeof body.billingCurrency === 'string' ? body.billingCurrency.trim().toUpperCase() : null;
+    if (currency && currency.length > 10) return res.status(400).json({ error: 'Invalid billing currency' });
+    pushUpdate('billing_currency', currency || 'USD', 'billingCurrency');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'customerNotes')) {
+    const notes = typeof body.customerNotes === 'string' ? body.customerNotes : null;
+    pushUpdate('customer_notes', notes, 'customerNotes');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'billingReference')) {
+    const reference = typeof body.billingReference === 'string' ? body.billingReference.trim() : null;
+    pushUpdate('billing_reference', reference || null, 'billingReference');
+  }
+
+  if (sets.length === 0) {
+    return res.status(400).json({ error: 'No updates supplied' });
+  }
+
+  sets.push('updated_at=NOW()');
+
+  const sql = `UPDATE users SET ${sets.join(', ')} WHERE id=$${idx}`;
+  values.push(userId);
+
+  try {
+    await pool.query(sql, values);
+  } catch (e) {
+    console.error('Error updating user record:', e);
+    return res.status(500).json({ error: 'Failed to update user' });
+  }
+
+  try {
+    await auditLog('admin_user_update', req.user.id, { userId, fields: changedFields, ipAddress: req.ip }, req.tenantId);
+  } catch (e) {
+    console.warn('Failed to log admin user update:', e);
+  }
+
+  try {
+    const updated = await pool.query(`${ADMIN_USER_SELECT} WHERE u.id=$1`, [userId]);
+    if (!updated.rows.length) return res.status(404).json({ error: 'User not found after update' });
+    const user = mapAdminUserRow(updated.rows[0]);
+    res.json({ success: true, user });
+  } catch (e) {
+    console.error('Error loading updated user:', e);
+    res.status(500).json({ error: 'Failed to load updated user' });
   }
 });
 

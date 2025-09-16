@@ -28,6 +28,7 @@ import InvestigationDetailPage from './pages/InvestigationDetail.tsx';
 import InvestigationMetricsPage from './pages/InvestigationMetrics.tsx';
 import { ThemeProvider } from './store/theme';
 import { worker } from './mocks/browser';
+import { clerkAppearance } from './config/clerkAppearance';
 
 // Optional MSW mocking (enable by setting VITE_ENABLE_MSW=true)
 if (import.meta.env.DEV && String(import.meta.env.VITE_ENABLE_MSW).toLowerCase() === 'true') {
@@ -73,7 +74,7 @@ if (!PUBLISHABLE_KEY) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/">
+    <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/" appearance={clerkAppearance}>
       <QueryClientProvider client={qc}>
         <ThemeProvider>
           <RouterProvider router={router} />

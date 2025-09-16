@@ -2,6 +2,7 @@ import { useTheme } from '../../store/theme';
 import { useUI } from '../../store/ui';
 import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-react';
 import { useNavigate } from 'react-router-dom';
+import { clerkAppearance } from '../../config/clerkAppearance';
 
 export function Topbar() {
   const { theme, setTheme } = useTheme();
@@ -35,10 +36,10 @@ export function Topbar() {
           </button>
         </SignedIn>
         <SignedOut>
-          <SignInButton />
+          <SignInButton appearance={clerkAppearance} />
         </SignedOut>
         <SignedIn>
-          <UserButton />
+          <UserButton appearance={clerkAppearance} />
         </SignedIn>
       </div>
     </header>

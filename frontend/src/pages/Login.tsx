@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { SignedIn, SignedOut, SignIn, SignInButton, SignUpButton, UserButton } from '@clerk/clerk-react';
 import { useAuth } from '../store/auth';
 import { authApi } from '../services/api';
+import { clerkAppearance } from '../config/clerkAppearance';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -57,11 +58,11 @@ export default function LoginPage() {
     <div className="min-h-screen grid" style={{ gridTemplateColumns: '40% 60%' }}>
       <header className="col-span-2 flex items-center justify-end gap-3 p-3 border-b border-border">
         <SignedOut>
-          <SignInButton />
-          <SignUpButton />
+          <SignInButton appearance={clerkAppearance} />
+          <SignUpButton appearance={clerkAppearance} />
         </SignedOut>
         <SignedIn>
-          <UserButton />
+          <UserButton appearance={clerkAppearance} />
         </SignedIn>
       </header>
       <section className="bg-surfaceAlt border-r border-border p-8 flex flex-col justify-center">
@@ -99,7 +100,7 @@ export default function LoginPage() {
       <section className="p-8 flex items-center">
         <div className="max-w-md w-full mx-auto">
           <SignedOut>
-            <SignIn afterSignInUrl="/report" signUpUrl="/login" />
+            <SignIn afterSignInUrl="/report" signUpUrl="/login" appearance={clerkAppearance} />
           </SignedOut>
           <SignedIn>
             <Navigate to="/report" replace />

@@ -226,3 +226,6 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+# Hackathon drafts
+AWS_AI_Hackthon.md

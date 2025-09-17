@@ -1,5 +1,32 @@
 # Asia Agentic SOC
 
+## Multi-Agent Pipeline (Plan → Execute → Analyze → Respond → Report)
+
+| Stage | Primary Agent | AWS Orchestration | Responsibilities | Key Artifacts |
+|-------|---------------|-------------------|------------------|---------------|
+| Plan | **Planner** | EventBridge `AgenticAlert` event + Lambda Ingest | Normalise inbound Sentinel/Splunk/Defender/Okta signals, enrich with tenant metadata, persist to DynamoDB | Investigation envelope (`TENANT#*` partition) |
+| Execute | **Context Executor** | Step Functions `GatherContext` task → Lambda Context | Fan-out read-only connector calls (Sentinel, Splunk, Defender, CrowdStrike, Entra, Okta) with rate-limited adapters, merge fixtures when credentials absent | Context bundle (`context` document in DDB) |
+| Analyze | **Analyst** | Step Functions `SummarizeWithAI` task → Lambda Summarize + Bedrock | Run RAG-backed reasoning loop (BedrockAnalyst runnable, TODO: KiroAnalyst, AmazonQAnalyst), map findings to HKMA SA-2 / TM-G-1, return confidence, timeline, guard-railed actions | Structured summary JSON (AI provider tagged) |
+| Respond | **Risk Orchestrator** | Step Functions `RiskDecider` Choice + `RequestApproval` | Compute MTTA/MTTI/MTTR/FPR deltas, classify risk, queue HITL approval (Phase B Slack/Teams/ServiceNow integration planned), enforce allow-list actions | Risk snapshot + approval request (S3 `approvals/…`) |
+| Adapt | **Learning Curator** | Step Functions `AdaptInsights` task → Lambda Adapt | Capture feedback (risk outcome, actions, metrics) and call `AnalystLLM.record_feedback` for per-tenant tuning; persist adaptation hints in DynamoDB | Adaptation record (`adaptation` attribute) + JSONL audit |
+| Report | **Audit Scribe** | Step Functions `WriteAuditTrail` task → Lambda Audit | Write immutable S3 JSONL, update DynamoDB status, emit metrics to CloudWatch dashboard + DynamoDB metrics table, feed compliance pack generation | Audit artifact (`audit/...json`), metrics rows |
+
+### Agent Contract Highlights
+- **Shared Memory**: DynamoDB tables `AsiaAgenticSocInvestigations-*` and `AsiaAgenticSocMetrics-*` act as short-term shared memory with KMS encryption. Each agent writes stage-specific fields while respecting tenant partitions.
+- **Knowledge Retrieval**: `src/knowledge/ingest.py` builds a Bedrock-embedded RAG corpus from `/knowledge/*.md` and `/playbooks/*.md` (10–20 HK-local SOPs). Analyst agents consume this via `knowledge_context` binding.
+- **Adaptive Feedback**: `AdaptInsights` stage calls `AnalystLLM.record_feedback` and stores `adaptation` hints (risk level, action counts) per tenant for future precision tuning.
+- **Registry & Messaging**: `src/agents/registry.py` persists agent metadata in DynamoDB, while `src/agents/messaging.py` publishes EventBridge telemetry for each stage.
+- **Compliance Hooks**: Report stage triggers `src/compliance/generate_pack.py`, bundling SA-2/TM-G-1 matrices, Mermaid diagrams, and HK encryption/retention drafts (ZIP archive) for HKMA due diligence.
+- **Guardrails & Actions**: Allowed actions restricted to `ISOLATE_EC2`, `BLOCK_IP_WAF`, `DISABLE_KEYS`, `TICKET_UPSERT`. Additional actions require Phase B governance with human approvals logged to S3 Object Lock bucket.
+- **Extensibility Roadmap**: Phase B introduces HITL automation (Teams/Slack approvals, ServiceNow/Jira tickets) and Detection Advisor cadence; Phase C extends integrations (email gateways, data lakes, threat intel) and SOC 2 readiness.
+
+### AWS AI Hackathon Alignment
+- **Infrastructure Footprint**: `infra/sam-template.yaml` codifies EventBridge → Lambda → Step Functions → DynamoDB/S3/KMS pipeline, CloudWatch dashboards, and least-privilege IAM policies mandated by HKMA.
+- **GenAI Strategy**: Bedrock is runnable baseline (Claude 3 Haiku + Titan embeddings). `KiroAnalyst` and `AmazonQAnalyst` interfaces are stubbed with TODOs detailing expected payloads per hackathon brief, ensuring future integration without blocking the demo.
+- **Compliance Focus**: `docs/hkma/` templates and `Makefile compliance` target produce HKMA SA-2/TM-G-1 packs, encryption/retention policies, and Mermaid data-flow diagrams, satisfying Phase A compliance deliverables.
+- **Demo Path**: `make demo` seeds synthetic alerts (`tools/seed`) via EventBridge, recomputes KPI baselines, and launches the Streamlit workbench (`ui/app.py`) to narrate the fintech ransomware scenario within 3 minutes as required by the hackathon playbook.
+- **KPIs & Auditability**: Metrics table captures MTTA/MTTI/MTTR/FPR with DynamoDB TTL for hygiene, CloudWatch dashboard surfaces state machine health, and audit bucket enforces WORM retention (7-year) via Object Lock.
+
 ## Phase A (Day 0–30) | POV Launch
 
 **Objective:** Deliver a minimal but credible proof-of-value by integrating key data sources, ingesting local knowledge, and producing compliance-ready artifacts.
@@ -233,9 +260,9 @@ Positioning: Next-gen SOC platform combining agentic AI with orchestration.
 Core Idea: AI analysts (autonomous agents with reasoning/decision-making) perform the full loop: alert analysis → investigation → response → reporting.
 
 Flagship Modules
-	•	Prophet AI SOC Analyst: Passive alert triage & closure
-	•	Prophet AI Threat Hunter: NL-driven proactive hunting
-	•	Prophet AI Detection Advisor: Noise reduction & detection tuning
+	•	 AI SOC Analyst: Passive alert triage & closure
+	•	 AI Threat Hunter: NL-driven proactive hunting
+	•	 AI Detection Advisor: Noise reduction & detection tuning
 
 Objective: Clear backlogs, reduce false positives, cut MTTR/MTTI.
 

@@ -1,0 +1,12 @@
+{
+  "value": [
+    {
+      "id": "defender-901",
+      "title": "Potential credential theft",
+      "category": "CredentialTheft",
+      "severity": "Medium",
+      "status": "active",
+      "createdDateTime": "2024-02-12T03:16:45Z"
+    }
+  ]
+}

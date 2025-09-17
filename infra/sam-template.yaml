@@ -1,0 +1,552 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  Asia Agentic SOC - AWS AI Hackathon footprint.
+  EventBridge -> Lambda -> Step Functions -> DynamoDB/S3/KMS pipeline with
+  compliance telemetry and audit logging.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 256
+    Handler: handler.handler
+    CodeUri: ../src
+    Tracing: Active
+    Environment:
+      Variables:
+        POWERTOOLS_SERVICE_NAME: AsiaAgenticSoc
+        LOG_LEVEL: INFO
+        DDB_INVESTIGATIONS_TABLE: !Ref InvestigationsTable
+        DDB_METRICS_TABLE: !Ref MetricsTable
+        ARTIFACTS_BUCKET: !Ref ArtifactsBucket
+        AUDIT_BUCKET: !Ref AuditBucket
+        KMS_KEY_ID: !Ref ArtifactsKey
+        BEDROCK_REGION: !Ref BedrockRegion
+        AI_PROVIDER: bedrock
+        DEFAULT_TENANT_ID: hk-demo
+        DDB_AGENTS_TABLE: !Ref AgentsTable
+  Api:
+    TracingEnabled: true
+
+Metadata:
+  AWS::ServerlessRepo::Application:
+    Name: AsiaAgenticSoc
+    Description: Step Functions orchestrated AI SOC proof-of-value
+
+Parameters:
+  StageName:
+    Type: String
+    Default: dev
+    Description: Deployment stage name used to scope resources.
+  BedrockRegion:
+    Type: String
+    Default: ap-southeast-1
+    AllowedValues:
+      - ap-southeast-1
+      - ap-northeast-1
+      - us-east-1
+      - us-west-2
+    Description: Region hosting the Bedrock endpoint for embeddings/inference.
+  IngestionBusName:
+    Type: String
+    Default: AsiaAgenticSocBus
+    Description: Custom EventBridge bus for incoming alert findings.
+  InvestigationStateMachineName:
+    Type: String
+    Default: AsiaAgenticSocStateMachine
+    Description: Name for the Step Functions state machine.
+  KmsAliasName:
+    Type: String
+    Default: alias/AsiaAgenticSoc
+    Description: Customer managed KMS key alias for S3/DynamoDB encryption.
+
+Resources:
+  ArtifactsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for encrypting SOC artifacts and secrets.
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow Services to Use the Key
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - dynamodb.amazonaws.com
+                - events.amazonaws.com
+                - states.amazonaws.com
+                - cloudwatch.amazonaws.com
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Resource: '*'
+  ArtifactsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Ref KmsAliasName
+      TargetKeyId: !Ref ArtifactsKey
+
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub asia-agentic-soc-artifacts-${AWS::AccountId}-${StageName}
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref ArtifactsKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      IntelligentTieringConfigurations:
+        - Id: default-tiering
+          Status: Enabled
+          Tierings:
+            - AccessTier: ARCHIVE_ACCESS
+              Days: 90
+            - AccessTier: DEEP_ARCHIVE_ACCESS
+              Days: 180
+
+  AuditBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub asia-agentic-soc-audit-${AWS::AccountId}-${StageName}
+      VersioningConfiguration:
+        Status: Enabled
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: COMPLIANCE
+            Years: 7
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref ArtifactsKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  InvestigationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub AsiaAgenticSocInvestigations-${StageName}
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        KMSMasterKeyId: !Ref ArtifactsKey
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+  MetricsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub AsiaAgenticSocMetrics-${StageName}
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        KMSMasterKeyId: !Ref ArtifactsKey
+      AttributeDefinitions:
+        - AttributeName: metric_date
+          AttributeType: S
+        - AttributeName: metric_name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: metric_date
+          KeyType: HASH
+        - AttributeName: metric_name
+          KeyType: RANGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  AgentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub AsiaAgenticSocAgents-${StageName}
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        KMSMasterKeyId: !Ref ArtifactsKey
+      AttributeDefinitions:
+        - AttributeName: agent_name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: agent_name
+          KeyType: HASH
+
+  InvestigationBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Ref IngestionBusName
+
+  IngestionRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Ref InvestigationBus
+      Name: !Sub AsiaAgenticSoc-Ingestion-${StageName}
+      Description: Route incoming security findings into Step Functions pipeline.
+      EventPattern:
+        source:
+          - asia.agentic.soc.ingestion
+      Targets:
+        - Arn: !GetAtt InvestigationStateMachine.Arn
+          Id: AsiaAgenticSocStateMachine
+          RoleArn: !GetAtt EventBridgeInvokeRole.Arn
+
+  InvestigationStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Ref InvestigationStateMachineName
+      Definition:
+        StartAt: IngestFinding
+        States:
+          IngestFinding:
+            Type: Task
+            Resource: !GetAtt IngestFunction.Arn
+            Next: GatherContext
+          GatherContext:
+            Type: Task
+            Resource: !GetAtt ContextFunction.Arn
+            Next: SummarizeWithAI
+            Retry:
+              - ErrorEquals:
+                  - States.ALL
+                IntervalSeconds: 2
+                MaxAttempts: 3
+                BackoffRate: 2.0
+          SummarizeWithAI:
+            Type: Task
+            Resource: !GetAtt SummarizeFunction.Arn
+            Next: RiskDecider
+            Catch:
+              - ErrorEquals:
+                  - States.ALL
+                ResultPath: $.aiError
+                Next: RiskDecider
+          RiskDecider:
+            Type: Task
+            Resource: !GetAtt RiskFunction.Arn
+            Next: BranchOnRisk
+          BranchOnRisk:
+            Type: Choice
+            Choices:
+              - Variable: $.risk.level
+                StringEquals: high
+                Next: RequestApproval
+            Default: AutoRemediate
+          AutoRemediate:
+            Type: Task
+            Resource: !GetAtt AutoRemediateFunction.Arn
+            Next: AdaptInsights
+          RequestApproval:
+            Type: Task
+            Resource: !GetAtt ApprovalFunction.Arn
+            Next: AdaptInsights
+          AdaptInsights:
+            Type: Task
+            Resource: !GetAtt AdaptFunction.Arn
+            Next: WriteAuditTrail
+          WriteAuditTrail:
+            Type: Task
+            Resource: !GetAtt AuditFunction.Arn
+            End: true
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref IngestFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ContextFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref SummarizeFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref RiskFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ApprovalFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AuditFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AutoRemediateFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AdaptFunction
+        - CloudWatchLogsFullAccess
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt StateMachineLogGroup.Arn
+        IncludeExecutionData: true
+        Level: ALL
+      Events:
+        IngestionEvent:
+          Type: EventBridgeRule
+          Properties:
+            EventBusName: !Ref InvestigationBus
+            Pattern:
+              source:
+                - asia.agentic.soc.ingestion
+
+  StateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/vendedlogs/states/${InvestigationStateMachineName}
+      RetentionInDays: 30
+      KmsKeyId: !Ref ArtifactsKey
+
+  EventBridgeInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AllowStepFunctionExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !GetAtt InvestigationStateMachine.Arn
+
+  IngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub AsiaAgenticSoc-Ingest-${StageName}
+      CodeUri: ../src
+      Handler: pipeline.ingest.handler
+      Description: Normalize incoming findings and persist initial investigation record.
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt InvestigationsTable.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+              Resource: !Ref ArtifactsKey
+
+  ContextFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub AsiaAgenticSoc-Context-${StageName}
+      Handler: pipeline.context.handler
+      Description: Fetch context from connectors and knowledge base.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref InvestigationsTable
+        - S3ReadPolicy:
+            BucketName: !Ref ArtifactsBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+                - kms:Decrypt
+              Resource: '*'
+
+  SummarizeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub AsiaAgenticSoc-Summarize-${StageName}
+      Handler: pipeline.summarize.handler
+      Description: Call LLM (Bedrock/Kiro/Q) to produce investigation summary.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InvestigationsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+                - bedrock:InvokeModelWithResponse
+                - kms:Decrypt
+              Resource: '*'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource: !Sub ${ArtifactsBucket.Arn}/*
+
+  RiskFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub AsiaAgenticSoc-Risk-${StageName}
+      Handler: pipeline.risk.handler
+      Description: Determine risk level and recommended actions.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref InvestigationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MetricsTable
+
+  ApprovalFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub AsiaAgenticSoc-Approval-${StageName}
+      Handler: remediation.approval.handler
+      Description: Placeholder for Phase B human-in-the-loop approvals.
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+                - sqs:SendMessage
+              Resource: '*'
+
+  AutoRemediateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub AsiaAgenticSoc-AutoRemediate-${StageName}
+      Handler: remediation.auto.handler
+      Description: Safe no-op auto-remediation for low-risk alerts in Phase A.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref InvestigationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InvestigationsTable
+
+  AdaptFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub AsiaAgenticSoc-Adapt-${StageName}
+      Handler: pipeline.adapt.handler
+      Description: Capture investigation feedback for adaptive tuning.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InvestigationsTable
+
+  AuditFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub AsiaAgenticSoc-Audit-${StageName}
+      Handler: pipeline.audit.handler
+      Description: Persist results and audit trail to DynamoDB and S3.
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InvestigationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MetricsTable
+        - S3WritePolicy:
+            BucketName: !Ref AuditBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+              Resource: !Ref ArtifactsKey
+
+  PipelineDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub AsiaAgenticSoc-${StageName}
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/States", "ExecutionsStarted", "StateMachineArn", "${InvestigationStateMachine.Arn}" ],
+                  [ ".", "ExecutionsSucceeded", ".", "." ],
+                  [ ".", "ExecutionsFailed", ".", "." ]
+                ],
+                "region": "${AWS::Region}",
+                "period": 300,
+                "stat": "Sum",
+                "title": "Investigation Execution Volume"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${SummarizeFunction}" ],
+                  [ ".", "Duration", ".", "." ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "AI Summarizer Health"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "${InvestigationsTable}" ],
+                  [ ".", "ConsumedWriteCapacityUnits", ".", "." ]
+                ],
+                "region": "${AWS::Region}",
+                "title": "DynamoDB Capacity"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  InvestigationBusName:
+    Description: Custom EventBridge bus name for ingestion.
+    Value: !Ref InvestigationBus
+  StateMachineArn:
+    Description: Step Functions state machine ARN.
+    Value: !GetAtt InvestigationStateMachine.Arn
+  InvestigationsTableName:
+    Description: DynamoDB table storing investigation entities.
+    Value: !Ref InvestigationsTable
+  MetricsTableName:
+    Description: DynamoDB table storing KPI aggregates.
+    Value: !Ref MetricsTable
+  ArtifactsBucketName:
+    Description: S3 bucket for AI artifacts and reports.
+    Value: !Ref ArtifactsBucket
+  AuditBucketName:
+    Description: Immutable S3 bucket for audit trails.
+    Value: !Ref AuditBucket

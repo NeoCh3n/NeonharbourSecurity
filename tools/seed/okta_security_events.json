@@ -1,0 +1,12 @@
+{
+  "events": [
+    {
+      "uuid": "okta-evt-77",
+      "eventType": "user.session.start",
+      "published": "2024-02-12T03:14:05Z",
+      "actor": {"displayName": "hk.ops"},
+      "client": {"ipAddress": "203.186.10.14"},
+      "outcome": {"result": "SUCCESS"}
+    }
+  ]
+}

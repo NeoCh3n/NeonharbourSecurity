@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict
 
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
 METRICS_TABLE = os.getenv("DDB_METRICS_TABLE", "AsiaAgenticSocMetrics-dev")
 OUTPUT_PATH = Path(os.getenv("METRICS_BASELINE_OUTPUT", "out/metrics_baseline.json"))
@@ -17,10 +18,13 @@ OUTPUT_PATH = Path(os.getenv("METRICS_BASELINE_OUTPUT", "out/metrics_baseline.js
 def fetch_metrics(metric_date: str) -> Dict[str, float]:
     client = boto3.resource("dynamodb")
     table = client.Table(METRICS_TABLE)
-    result = table.query(
-        KeyConditionExpression="metric_date = :date",
-        ExpressionAttributeValues={":date": metric_date},
-    )
+    try:
+        result = table.query(
+            KeyConditionExpression="metric_date = :date",
+            ExpressionAttributeValues={":date": metric_date},
+        )
+    except (ClientError, BotoCoreError, ValueError):
+        return {}
     metrics: Dict[str, float] = {}
     for item in result.get("Items", []):
         value = item.get("value")

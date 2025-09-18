@@ -119,10 +119,7 @@ class BedrockAnalyst(AnalystLLM):
             if not text:
                 embeddings.append([])
                 continue
-            body = {
-                "inputText": text,
-                "dimensions": 1536,
-            }
+            body = self._build_embedding_request(text)
             response = self._runtime.invoke_model(
                 modelId=self._config.embed_model_id,
                 body=json.dumps(body).encode("utf-8"),
@@ -130,9 +127,52 @@ class BedrockAnalyst(AnalystLLM):
                 contentType="application/json",
             )
             payload = json.loads(response["body"].read().decode("utf-8"))
-            vector = payload.get("embedding", [])
+            vector = self._extract_embedding_vector(payload)
             embeddings.append(vector)
         return embeddings
+
+    def _build_embedding_request(self, text: str) -> Dict[str, Any]:
+        model_id = self._config.embed_model_id.lower()
+        base_request: Dict[str, Any] = {"inputText": text}
+
+        # Allow overriding embedding dimensions through env var for compatible models.
+        configured_dim = os.getenv("BEDROCK_EMBED_DIMENSIONS")
+        if configured_dim:
+            try:
+                dim = int(configured_dim)
+            except ValueError:
+                dim = None
+        else:
+            dim = None
+
+        if "titan-embed-text-v2" in model_id:
+            # Titan v2 expects the optional dimension inside embeddingConfig and defaults to 1024.
+            if dim:
+                base_request["embeddingConfig"] = {"outputEmbeddingLength": dim}
+        elif "titan-embed-text" in model_id:
+            # Earlier Titan variants accept a top-level "dimensions" field; fallback to 1536.
+            base_request["dimensions"] = dim or 1536
+        else:
+            # Unknown providers keep the minimal payload and rely on defaults.
+            if dim:
+                base_request["dimensions"] = dim
+        return base_request
+
+    @staticmethod
+    def _extract_embedding_vector(payload: Dict[str, Any]) -> List[float]:
+        if "embedding" in payload and isinstance(payload["embedding"], list):
+            return payload["embedding"]
+        if (
+            "embedding" in payload
+            and isinstance(payload["embedding"], dict)
+            and isinstance(payload["embedding"].get("embedding"), list)
+        ):
+            return payload["embedding"]["embedding"]
+        if "output" in payload and isinstance(payload["output"], dict):
+            vector = payload["output"].get("embedding") or payload["output"].get("vector")
+            if isinstance(vector, list):
+                return vector
+        return []
 
     def _system_prompt(self) -> str:
         return (

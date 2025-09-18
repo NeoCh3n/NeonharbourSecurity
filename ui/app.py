@@ -168,7 +168,11 @@ def display_metrics(items: List[Dict[str, Any]]):
     pdf.set_font("Helvetica", size=12)
     for name, value in baseline.items():
         pdf.cell(0, 8, f"{name}: {value}", ln=True)
-    pdf_output = pdf.output(dest="S").encode("latin1")
+    pdf_output = pdf.output(dest="S")
+    if isinstance(pdf_output, str):
+        pdf_output = pdf_output.encode("latin1")
+    else:
+        pdf_output = bytes(pdf_output)
 
     st.download_button(
         "Download KPI CSV",

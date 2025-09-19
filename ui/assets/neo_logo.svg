@@ -1,0 +1,18 @@
+<svg width="160" height="160" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="neoGradient" x1="20" y1="140" x2="140" y2="20" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0EA5E9" />
+      <stop offset="0.45" stop-color="#6366F1" />
+      <stop offset="1" stop-color="#14F4C9" />
+    </linearGradient>
+    <linearGradient id="neoAccent" x1="40" y1="120" x2="120" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F172A" />
+      <stop offset="1" stop-color="#020617" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#0F172A" flood-opacity="0.45" />
+    </filter>
+  </defs>
+  <rect x="12" y="12" width="136" height="136" rx="28" fill="url(#neoAccent)" />
+  <path d="M44 112V48C44 44 46.8 41.2 50.8 41.2H58.4C62.4 41.2 64 43.6 66.4 47.2L100.8 98.4V48C100.8 44 103.6 41.2 107.6 41.2H115.2C119.2 41.2 122 44 122 48V112C122 116 119.2 118.8 115.2 118.8H107.6C103.6 118.8 102 116.4 99.6 112.8L65.2 61.6V112C65.2 116 62.4 118.8 58.4 118.8H50.8C46.8 118.8 44 116 44 112Z" fill="url(#neoGradient)" filter="url(#shadow)" />
+</svg>

@@ -12,7 +12,7 @@
 1. **Clone and setup**
    ```bash
    git clone <repository>
-   cd NeonharbourSecurity
+   cd NeoHarbourSecurity
    cp .env.example .env
    # Edit .env with your API keys
    ```

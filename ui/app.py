@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import time
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from random import uniform
@@ -422,25 +423,186 @@ def compute_agent_stage_states(
     return stages
 
 
-def render_agent_status_board(stage_states: List[Dict[str, Any]]) -> None:
-    st.subheader("Agent workflow status")
-    st.caption("Copilot transparency – every stage surfaces status, core actions, and captured artefacts.")
-    labels = {"completed": "Completed", "running": "In flight", "queued": "Queued"}
-    for offset in range(0, len(stage_states), 3):
-        cols = st.columns(3)
-        for col, state in zip(cols, stage_states[offset : offset + 3]):
-            with col:
-                chip = f"<span class='neo-status-chip' data-state='{state['status']}'>● {labels.get(state['status'], state['status'])}</span>"
-                st.markdown(
-                    f"<div class='neo-agent-card'><h4>{state['label']} · {state['agent']}</h4>{chip}<p>{state['description']}</p></div>",
-                    unsafe_allow_html=True,
-                )
-                progress_value = min(max(int(state.get("percent", 0)), 0), 100)
-                st.progress(progress_value)
-                if state.get("actions"):
-                    st.markdown("**Key actions**")
-                    for action in state["actions"]:
-                        st.markdown(f"- {action}")
+def simulation_state_key(investigation_id: str) -> str:
+    return f"pipeline_sim_states_{investigation_id}"
+
+
+def simulation_history_key(investigation_id: str) -> str:
+    return f"pipeline_history_{investigation_id}"
+
+
+def resolve_stage_states(
+    investigation_id: str,
+    base_states: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    sim_key = simulation_state_key(investigation_id)
+    override = st.session_state.get(sim_key)
+    if isinstance(override, list) and override:
+        return override
+    return base_states
+
+
+def render_agent_status_board(
+    stage_states: List[Dict[str, Any]],
+    placeholder: Optional[Any] = None,
+) -> None:
+    container = placeholder.container() if placeholder else st.container()
+    with container:
+        labels = {"completed": "Completed", "running": "In flight", "queued": "Queued"}
+        for offset in range(0, len(stage_states), 3):
+            cols = st.columns(3)
+            for col, state in zip(cols, stage_states[offset : offset + 3]):
+                with col:
+                    chip = (
+                        f"<span class='neo-status-chip' data-state='{state['status']}'>● "
+                        f"{labels.get(state['status'], state['status'])}</span>"
+                    )
+                    st.markdown(
+                        f"<div class='neo-agent-card'><h4>{state['label']} · {state['agent']}</h4>{chip}<p>{state['description']}</p></div>",
+                        unsafe_allow_html=True,
+                    )
+                    progress_value = min(max(int(state.get("percent", 0)), 0), 100)
+                    st.progress(progress_value)
+                    if state.get("actions"):
+                        st.markdown("**Key actions**")
+                        for action in state["actions"]:
+                            st.markdown(f"- {action}")
+
+
+def render_agent_status_panel(
+    investigation_id: str,
+    detail: Dict[str, Any],
+    timeline_rows: List[Dict[str, Any]],
+    mode: str,
+) -> None:
+    base_states = compute_agent_stage_states(investigation_id, detail, timeline_rows)
+    with st.container():
+        info_col, slider_col, button_col = st.columns([3, 2, 2])
+        with info_col:
+            st.subheader("Agent workflow status")
+            st.caption("Copilot transparency – every stage surfaces status, core actions, and captured artefacts.")
+        with slider_col:
+            speed_key = f"pipeline_speed_{investigation_id}"
+            default_speed = float(st.session_state.get(speed_key, 0.8))
+            speed = st.slider(
+                "Stage delay (seconds)",
+                min_value=0.2,
+                max_value=2.0,
+                value=default_speed,
+                step=0.1,
+                key=speed_key,
+            )
+        with button_col:
+            run_clicked = st.button(
+                "Run Agentic Pipeline",
+                key=f"run-{investigation_id}",
+                use_container_width=True,
+            )
+            reset_clicked = st.button(
+                "Reset Demo",
+                key=f"reset-{investigation_id}",
+                type="secondary",
+                use_container_width=True,
+            )
+
+        board_placeholder = st.empty()
+        current_states = resolve_stage_states(investigation_id, base_states)
+        render_agent_status_board(current_states, board_placeholder)
+
+        if reset_clicked:
+            clear_pipeline_simulation(investigation_id)
+            render_agent_status_board(base_states, board_placeholder)
+
+        if run_clicked:
+            clear_pipeline_simulation(investigation_id)
+            if mode == "Live":
+                st.warning("Switch to Demo Mode to play the agentic pipeline animation.")
+                render_agent_status_board(base_states, board_placeholder)
+            else:
+                run_pipeline_simulation(investigation_id, base_states, board_placeholder, speed)
+                final_states = resolve_stage_states(investigation_id, base_states)
+                render_agent_status_board(final_states, board_placeholder)
+
+        st.caption(
+            "Agent telemetry updates alongside the simulation — monitor each copilot as it transitions across Plan → Report."
+        )
+        render_pipeline_history(investigation_id)
+
+
+def clear_pipeline_simulation(investigation_id: str) -> None:
+    st.session_state.pop(simulation_state_key(investigation_id), None)
+    st.session_state.pop(simulation_history_key(investigation_id), None)
+
+
+def render_pipeline_history(investigation_id: str) -> None:
+    history_key = simulation_history_key(investigation_id)
+    history = st.session_state.get(history_key, [])
+    if history:
+        st.dataframe(pd.DataFrame(history), use_container_width=True)
+        graph_lines = ["digraph Pipeline {", "  rankdir=LR;", "  node [shape=box, style=filled, fontname='Helvetica'];"]
+        for step in PIPELINE_STEPS:
+            stage = step["stage"]
+            graph_lines.append(
+                f"  {stage} [label=\"{step['label']}\\n{step['agent']}\", fillcolor='#dbeafe', color='#2563eb'];"
+            )
+        for idx in range(len(PIPELINE_STEPS) - 1):
+            source = PIPELINE_STEPS[idx]["stage"]
+            target = PIPELINE_STEPS[idx + 1]["stage"]
+            graph_lines.append(f"  {source} -> {target};")
+        graph_lines.append("}")
+        with st.expander("Agentic Flow Diagram", expanded=False):
+            st.graphviz_chart("\n".join(graph_lines))
+    else:
+        st.info("Click \"Run Agentic Pipeline\" to watch the agents coordinate stage by stage (点击按钮即可开始演示).")
+
+
+def run_pipeline_simulation(
+    investigation_id: str,
+    base_states: List[Dict[str, Any]],
+    placeholder: Any,
+    speed: float,
+) -> None:
+    history_key = simulation_history_key(investigation_id)
+    st.session_state[history_key] = []
+    speed = max(speed, 0.1)
+    for idx, step in enumerate(PIPELINE_STEPS):
+        stage_states: List[Dict[str, Any]] = []
+        for stage_idx, base in enumerate(base_states):
+            state = deepcopy(base)
+            if stage_idx < idx:
+                state["status"] = "completed"
+                state["percent"] = 100
+            elif stage_idx == idx:
+                state["status"] = "running"
+                state["percent"] = 60
+            else:
+                state["status"] = "queued"
+                state["percent"] = 15
+            stage_states.append(state)
+        st.session_state[simulation_state_key(investigation_id)] = stage_states
+        render_agent_status_board(stage_states, placeholder)
+        min_d, max_d = step.get("duration_range", (0.6, 1.2))
+        delay = uniform(min_d, max_d) * speed
+        completion_time = datetime.utcnow().isoformat() + "Z"
+        st.session_state[history_key].append(
+            {
+                "Stage": step["label"],
+                "Agent": step["agent"],
+                "Key Output": ", ".join(step["artifacts"]),
+                "Duration (s)": round(delay, 2),
+                "Completed": completion_time,
+            }
+        )
+        time.sleep(delay)
+
+    final_states: List[Dict[str, Any]] = []
+    for base in base_states:
+        state = deepcopy(base)
+        state["status"] = "completed"
+        state["percent"] = 100
+        final_states.append(state)
+    st.session_state[simulation_state_key(investigation_id)] = final_states
+    render_agent_status_board(final_states, placeholder)
 
 
 def render_agent_action_center(investigation_id: str, detail: Dict[str, Any]) -> None:
@@ -560,11 +722,9 @@ def render_agents_copilot(items: List[Dict[str, Any]], mode: str) -> None:
         detail = seed.get(investigation_id, {}) if isinstance(seed, dict) else {}
     timeline_rows = fetch_timeline(investigation_id, detail.get("timeline") or [])
 
-    stage_states = compute_agent_stage_states(investigation_id, detail, timeline_rows)
-    render_agent_status_board(stage_states)
+    render_agent_status_panel(investigation_id, detail, timeline_rows, mode)
     render_agent_action_center(investigation_id, detail)
     render_agent_event_feed(timeline_rows)
-    display_pipeline_simulator(investigation_id, mode)
 
 
 def render_knowledge_hub() -> None:
@@ -1057,75 +1217,6 @@ def synthesize_stage_entry(stage: str, payload: Dict[str, Any], detail: Dict[str
         "status": "Completed",
         "completedAt": completed,
     }
-
-
-def display_pipeline_simulator(investigation_id: str, mode: str):
-    if mode == "Live":
-        return
-    st.subheader("Agentic Pipeline Simulator")
-    st.caption("Run a stage-by-stage animation to observe how each agent collaborates across the pipeline.")
-
-    speed_key = f"pipeline_speed_{investigation_id}"
-    default_speed = st.session_state.get(speed_key, 0.8)
-    speed = st.slider(
-        "Stage delay (seconds)",
-        min_value=0.2,
-        max_value=2.0,
-        value=float(default_speed),
-        step=0.1,
-        key=speed_key,
-    )
-
-    history_key = f"pipeline_history_{investigation_id}"
-    col_run, col_reset = st.columns(2)
-
-    if col_run.button("Run Agentic Pipeline", key=f"run-{investigation_id}"):
-        st.session_state[history_key] = []
-        progress = st.progress(0)
-        status = st.status("Pipeline executing…", expanded=True)
-        total = len(PIPELINE_STEPS)
-        for idx, step in enumerate(PIPELINE_STEPS, start=1):
-            status.write(
-                f"**{step['label']} · {step['agent']}**\n"
-                f"{step['description']}\n"
-                f"Artifacts: {', '.join(step['artifacts'])}"
-            )
-            min_d, max_d = step["duration_range"]
-            delay = uniform(min_d, max_d) * speed
-            completion_time = datetime.utcnow().isoformat() + "Z"
-            st.session_state[history_key].append(
-                {
-                    "Stage": step["label"],
-                    "Agent": step["agent"],
-                    "Key Output": ", ".join(step["artifacts"]),
-                    "Duration (s)": round(delay, 2),
-                    "Completed": completion_time,
-                }
-            )
-            progress.progress(idx / total)
-            time.sleep(delay)
-        status.update(label="Pipeline completed", state="complete", expanded=False)
-
-    if col_reset.button("Clear Run", key=f"reset-{investigation_id}"):
-        st.session_state.pop(history_key, None)
-
-    history = st.session_state.get(history_key, [])
-    if history:
-        st.dataframe(pd.DataFrame(history), use_container_width=True)
-        graph_lines = ["digraph Pipeline {", "  rankdir=LR;", "  node [shape=box, style=filled, color='#2563eb', fontname='Helvetica'];"]
-        for step in PIPELINE_STEPS:
-            graph_lines.append(
-                f"  {step['stage']} [label=\"{step['label']}\\n{step['agent']}\", fillcolor='#dbeafe'];"
-            )
-        for idx in range(len(PIPELINE_STEPS) - 1):
-            source = PIPELINE_STEPS[idx]["stage"]
-            target = PIPELINE_STEPS[idx + 1]["stage"]
-            graph_lines.append(f"  {source} -> {target};")
-        graph_lines.append("}")
-        with st.expander("Agentic Flow Diagram", expanded=False):
-            st.graphviz_chart("\n".join(graph_lines))
-    else:
-        st.info("Click \"Run Agentic Pipeline\" to watch the agents coordinate stage by stage (点击按钮即可开始演示).")
 
 
 def display_metrics(items: List[Dict[str, Any]]):

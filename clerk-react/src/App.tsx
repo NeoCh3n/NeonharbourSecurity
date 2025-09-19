@@ -1,5 +1,5 @@
 import './App.css';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AppLayout,
   Badge,
@@ -10,253 +10,797 @@ import {
   Container,
   ContentLayout,
   Flashbar,
-  FormField,
   Header,
-  Input,
-  Link,
-  Modal,
   SideNavigation,
   SpaceBetween,
   StatusIndicator,
   Table,
+  Tabs,
   TopNavigation,
+  Spinner,
 } from '@cloudscape-design/components';
+import type {
+  BadgeProps,
+  NonCancelableCustomEvent,
+  SideNavigationProps,
+  StatusIndicatorProps,
+  TableProps,
+} from '@cloudscape-design/components';
+import { useQuery } from '@tanstack/react-query';
 import {
   SignedIn,
   SignedOut,
   SignInButton,
   UserButton,
 } from '@clerk/clerk-react';
-import type { BadgeProps, InputProps, NonCancelableCustomEvent, SideNavigationProps, TableProps } from '@cloudscape-design/components';
 
-type Alert = {
-  id: string;
-  vendor: string;
-  severity: 'High' | 'Medium' | 'Low';
-  status: string;
-  resource: string;
-  time: string;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000';
+const DEMO_TOKEN = import.meta.env.VITE_DEMO_AUTH_TOKEN ?? 'change-me';
+
+type RecommendedAction = {
+  action_id?: string;
+  description?: string;
+  rationale?: string;
 };
 
-const mockAlerts: Alert[] = [
+type InvestigationSummary = {
+  investigationId: string;
+  stage?: string;
+  riskLevel?: string;
+  receivedAt?: string;
+  updatedAt?: string;
+  tenantId?: string;
+};
+
+type InvestigationDetail = InvestigationSummary & {
+  summary?: {
+    summary?: string;
+    risk_level?: string;
+    confidence?: number;
+    recommended_actions?: RecommendedAction[];
+    timeline?: Array<Record<string, unknown>>;
+  };
+  context?: Record<string, unknown>;
+  risk?: Record<string, unknown>;
+};
+
+type TimelineEvent = {
+  id: string;
+  timestamp: string;
+  stage: string;
+  detail: string;
+  durationSeconds?: number;
+};
+
+type NavigationChangeEvent = NonCancelableCustomEvent<{ open: boolean }>;
+
+const FALLBACK_INVESTIGATIONS: InvestigationSummary[] = [
   {
-    id: 'A-101',
-    vendor: 'GuardDuty',
-    severity: 'High',
-    status: 'Open',
-    resource: 'i-0ab12c3d4',
-    time: '2025-09-15 12:41',
+    investigationId: 'INV-20240212-001',
+    tenantId: 'hk-demo',
+    stage: 'summarized',
+    riskLevel: 'high',
+    receivedAt: '2024-02-12T03:14:00Z',
+    updatedAt: '2024-02-12T03:20:00Z',
   },
   {
-    id: 'A-102',
-    vendor: 'Sentinel',
-    severity: 'Medium',
-    status: 'Investigating',
-    resource: 'vm-eastus-12',
-    time: '2025-09-16 03:22',
-  },
-  {
-    id: 'A-103',
-    vendor: 'CrowdStrike',
-    severity: 'Low',
-    status: 'Closed',
-    resource: 'host-34',
-    time: '2025-09-16 18:05',
+    investigationId: 'INV-20240211-004',
+    tenantId: 'hk-demo',
+    stage: 'completed',
+    riskLevel: 'low',
+    receivedAt: '2024-02-11T10:02:00Z',
+    updatedAt: '2024-02-11T11:30:00Z',
   },
 ];
 
-const severityColors: Record<Alert['severity'], NonNullable<BadgeProps['color']>> = {
-  High: 'severity-high',
-  Medium: 'severity-medium',
-  Low: 'severity-low',
+const FALLBACK_DETAILS: Record<string, InvestigationDetail> = {
+  'INV-20240212-001': {
+    investigationId: 'INV-20240212-001',
+    tenantId: 'hk-demo',
+    stage: 'summarized',
+    riskLevel: 'high',
+    summary: {
+      summary:
+        'Unusual admin login from a new ASN triggered conditional access failure, likely credential stuffing attempt.',
+      risk_level: 'high',
+      confidence: 0.72,
+      recommended_actions: [
+        {
+          action_id: 'DISABLE_KEYS',
+          description: 'Disable HK Ops admin break-glass keys',
+          rationale: 'Contain potential abuse.',
+        },
+        {
+          action_id: 'BLOCK_IP_WAF',
+          description: 'Block offending ASN at WAF',
+          rationale: 'Stop further bursts.',
+        },
+      ],
+      timeline: [
+        { time: '2024-02-12T03:14:00Z', step: 'Alert received from Sentinel' },
+        { time: '2024-02-12T03:16:00Z', step: 'Correlated with Splunk login failures' },
+        { time: '2024-02-12T03:18:00Z', step: 'Recommended containment actions prepared' },
+      ],
+    },
+    context: {
+      sentinel_alerts: [{ alertId: 'sentinel-001' }],
+      splunk_events: [{ _time: '2024-02-12T03:13:21Z', status: 'failed' }],
+      entra_signins: [
+        {
+          id: 'entra-001',
+          status: { failureReason: 'Conditional Access policy' },
+          ipAddress: '203.120.55.21',
+        },
+      ],
+    },
+  },
+  'INV-20240211-004': {
+    investigationId: 'INV-20240211-004',
+    tenantId: 'hk-demo',
+    stage: 'completed',
+    riskLevel: 'low',
+    summary: {
+      summary:
+        'Okta password spray alert suppressed after MFA enforcement. Multiple failed authentications from a known corporate VPN.',
+      risk_level: 'low',
+      confidence: 0.91,
+      recommended_actions: [
+        {
+          action_id: 'TICKET_UPSERT',
+          description: 'Notify IAM operations of repeated failures',
+          rationale: 'Track noisy accounts and adjust thresholds.',
+        },
+      ],
+      timeline: [
+        { time: '2024-02-11T10:02:00Z', step: 'Okta alert raised' },
+        { time: '2024-02-11T10:10:00Z', step: 'Matched VPN source and suppressed' },
+      ],
+    },
+    context: {
+      okta_events: [
+        { id: 'okta-992', result: 'FAILURE', ipAddress: '18.162.4.12' },
+        { id: 'okta-993', result: 'FAILURE', ipAddress: '18.162.4.12' },
+      ],
+    },
+  },
 };
 
-const navItems: SideNavigationProps['items'] = [
-  { type: 'link', text: 'Alerts', href: '#alerts', info: <Badge color="blue">3</Badge> },
-  { type: 'link', text: 'Incidents', href: '#incidents' },
-  { type: 'link', text: 'Automations', href: '#runbooks' },
+const riskBadgeColors: Record<string, BadgeProps['color']> = {
+  high: 'severity-high',
+  medium: 'severity-medium',
+  low: 'severity-low',
+};
+
+const riskIndicatorMap: Record<string, StatusIndicatorProps.Type> = {
+  high: 'error',
+  medium: 'warning',
+  low: 'success',
+};
+
+const stageIndicatorMap: Record<string, StatusIndicatorProps.Type> = {
+  plan: 'in-progress',
+  execute: 'in-progress',
+  analyze: 'info',
+  respond: 'warning',
+  adapt: 'info',
+  report: 'success',
+  summarized: 'info',
+  completed: 'success',
+  closed: 'success',
+};
+
+const defaultNavItems: SideNavigationProps.Item[] = [
+  { type: 'link', text: 'Investigations', href: '#investigations' },
+  { type: 'link', text: 'Automations', href: '#automations' },
   { type: 'link', text: 'Compliance', href: '#compliance' },
   { type: 'divider' },
   { type: 'link', text: 'Analytics', href: '#analytics' },
   { type: 'link', text: 'Settings', href: '#settings' },
 ];
 
-type NavigationChangeEvent = NonCancelableCustomEvent<{
-  open: boolean;
-}>;
-
-type QuickSightPanelProps = {
-  embedUrl?: string;
-};
-
-const QuickSightPanel = ({ embedUrl }: QuickSightPanelProps) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const containerElement = containerRef.current;
-
-    if (!embedUrl || !containerElement) {
-      if (containerElement) {
-        containerElement.innerHTML = '';
-      }
-      setError(null);
-      return;
-    }
-
-    let isActive = true;
-
-    containerElement.innerHTML = '';
-    setError(null);
-
-    (async () => {
-      try {
-        const { createEmbeddingContext } = await import('amazon-quicksight-embedding-sdk');
-        const context = await createEmbeddingContext();
-        await context.embedDashboard(
-          {
-            url: embedUrl,
-            container: containerElement,
-            width: '100%',
-            height: '700px',
-          }
-        );
-      } catch (err) {
-        if (!isActive) return;
-        const message = err instanceof Error ? err.message : 'Failed to load QuickSight';
-        setError(message);
-      }
-    })();
-
-    return () => {
-      isActive = false;
-      containerElement.innerHTML = '';
-    };
-  }, [embedUrl]);
-
-  if (!embedUrl) {
-    return (
-      <Container header={<Header variant="h2">SOC KPIs</Header>}>
-        <StatusIndicator type="pending">Waiting for QuickSight embed URL…</StatusIndicator>
-        <Box margin={{ top: 's' }}>
-          Provide an <Box variant="code">embedUrl</Box> from your backend signer.
-        </Box>
-      </Container>
-    );
-  }
-
-  return (
-    <Container header={<Header variant="h2">SOC KPIs</Header>}>
-      {error ? <Flashbar items={[{ type: 'error', content: error, id: 'qs-error' }]} /> : null}
-      <div ref={containerRef} />
-    </Container>
-  );
-};
-
 const SignedOutView = () => (
   <Box textAlign="center" padding="xxl">
     <SpaceBetween size="l">
-      <Box variant="h1">Welcome to Neo SOC</Box>
-      <Box variant="p">Enterprise-grade AI SOC on Cloudscape UI</Box>
+      <Box variant="h1">NeoHarbourSecurity Workbench</Box>
+      <Box variant="p">Sign in with Clerk to inspect investigations and agent timelines.</Box>
       <SignInButton mode="modal">
-        <Button variant="primary">Sign in with Clerk</Button>
+        <Button variant="primary">Sign in</Button>
       </SignInButton>
     </SpaceBetween>
   </Box>
 );
 
-const AlertsTable = () => {
-  const [filter, setFilter] = useState('');
-  const [selectedItems, setSelectedItems] = useState<Alert[]>([]);
+const formatDateTime = (value?: string) => {
+  if (!value) return '—';
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    return value;
+  }
+  return new Date(parsed).toLocaleString();
+};
 
-  const items = mockAlerts.filter((alert) =>
-    alert.id.toLowerCase().includes(filter.toLowerCase()) ||
-    alert.vendor.toLowerCase().includes(filter.toLowerCase())
+const titleCase = (value?: string) => {
+  if (!value) return '—';
+  return value.charAt(0).toUpperCase() + value.slice(1);
+};
+
+async function fetchJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      Authorization: `Bearer ${DEMO_TOKEN}`,
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Request failed with status ${response.status}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+const fetchInvestigations = async (): Promise<InvestigationSummary[]> => {
+  const payload = await fetchJson<unknown>(`/investigations`);
+  if (Array.isArray(payload)) {
+    return payload as InvestigationSummary[];
+  }
+  if (payload && typeof payload === 'object' && 'items' in payload) {
+    const { items } = payload as { items?: InvestigationSummary[] };
+    return items ?? [];
+  }
+  return [];
+};
+
+const fetchInvestigationDetail = async (id: string): Promise<InvestigationDetail> => {
+  return fetchJson<InvestigationDetail>(`/investigations/${id}`);
+};
+
+const fetchInvestigationTimeline = async (id: string): Promise<TimelineEvent[]> => {
+  const payload = await fetchJson<unknown>(`/investigations/${id}/timeline`);
+  return normalizeTimelineData(payload);
+};
+
+const normalizeTimelineData = (
+  raw: unknown,
+  fallback?: Array<Record<string, unknown>>,
+): TimelineEvent[] => {
+  const rawItems = Array.isArray(raw)
+    ? raw
+    : Array.isArray((raw as { items?: unknown[] })?.items)
+    ? ((raw as { items?: unknown[] }).items as unknown[])
+    : Array.isArray((raw as { results?: unknown[] })?.results)
+    ? ((raw as { results?: unknown[] }).results as unknown[])
+    : [];
+  const source = rawItems.length ? rawItems : fallback ?? [];
+  return source.map((entry, index) => {
+    const record = (entry || {}) as Record<string, unknown>;
+    const rawStage = (record.stage || record.label || record.step || 'Event') as string;
+    const rawTimestamp =
+      (record.time || record.startedAt || record.completedAt || '') as string;
+    let duration = (record.durationSeconds || record.duration) as number | undefined;
+    const start = record.startedAt ?? record.startTime ?? null;
+    const end = record.completedAt ?? record.endTime ?? null;
+    if (duration == null && typeof start === 'string' && typeof end === 'string') {
+      const startMs = Date.parse(start);
+      const endMs = Date.parse(end);
+      if (!Number.isNaN(startMs) && !Number.isNaN(endMs)) {
+        duration = Math.max((endMs - startMs) / 1000, 0);
+      }
+    }
+    const detailValue =
+      record.detail ?? record.description ?? record.step ?? record.payload ?? '';
+    const detail =
+      typeof detailValue === 'string'
+        ? detailValue
+        : detailValue
+        ? JSON.stringify(detailValue, null, 2)
+        : '';
+    return {
+      id: (record.id as string) ?? `${rawStage}-${index}`,
+      timestamp: rawTimestamp,
+      stage: rawStage,
+      detail,
+      durationSeconds:
+        typeof duration === 'number' ? Math.round(duration * 100) / 100 : undefined,
+    };
+  });
+};
+
+type InvestigationMetricsProps = {
+  items: InvestigationSummary[];
+  isFallback: boolean;
+};
+
+const InvestigationMetrics = ({ items, isFallback }: InvestigationMetricsProps) => {
+  const total = items.length;
+  const open = items.filter((item) => {
+    const stage = (item.stage ?? '').toLowerCase();
+    return stage && !['completed', 'closed'].includes(stage);
+  }).length;
+  const completed = total - open;
+  const highRisk = items.filter(
+    (item) => (item.riskLevel ?? '').toLowerCase() === 'high',
+  ).length;
+
+  return (
+    <Container
+      header={
+        <Header
+          variant="h2"
+          actions={
+            <StatusIndicator type={isFallback ? 'warning' : 'success'}>
+              {isFallback ? 'Demo data' : 'Live API'}
+            </StatusIndicator>
+          }
+        >
+          Queue overview
+        </Header>
+      }
+    >
+      <ColumnLayout columns={3} variant="text-grid">
+        <Box>
+          <Box variant="awsui-key-label">Open investigations</Box>
+          <Box variant="h1">{open}</Box>
+          <Box variant="p">Currently in progress</Box>
+        </Box>
+        <Box>
+          <Box variant="awsui-key-label">Completed</Box>
+          <Box variant="h1">{completed}</Box>
+          <Box variant="p">Resolved by agents</Box>
+        </Box>
+        <Box>
+          <Box variant="awsui-key-label">High risk</Box>
+          <Box variant="h1">{highRisk}</Box>
+          <Box variant="p">Escalations requiring review</Box>
+        </Box>
+      </ColumnLayout>
+    </Container>
   );
+};
 
-  const columnDefinitions: TableProps.ColumnDefinition<Alert>[] = [
-    { id: 'id', header: 'Alert ID', cell: (item: Alert) => item.id },
-    { id: 'vendor', header: 'Source', cell: (item: Alert) => item.vendor },
+type InvestigationsTableProps = {
+  items: InvestigationSummary[];
+  loading: boolean;
+  error: Error | null;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  onRefresh: () => void;
+  isFallback: boolean;
+};
+
+const InvestigationsTable = ({
+  items,
+  loading,
+  error,
+  selectedId,
+  onSelect,
+  onRefresh,
+  isFallback,
+}: InvestigationsTableProps) => {
+  const columnDefinitions: TableProps.ColumnDefinition<InvestigationSummary>[] = [
     {
-      id: 'severity',
-      header: 'Severity',
-      cell: (item: Alert) => (
-        <Badge color={severityColors[item.severity]}>
-          {item.severity}
+      id: 'investigationId',
+      header: 'Investigation ID',
+      cell: (item) => item.investigationId,
+      sortingField: 'investigationId',
+    },
+    {
+      id: 'stage',
+      header: 'Stage',
+      cell: (item) => (
+        <StatusIndicator
+          type={
+            stageIndicatorMap[(item.stage ?? '').toLowerCase()] ?? 'info'
+          }
+        >
+          {titleCase(item.stage)}
+        </StatusIndicator>
+      ),
+    },
+    {
+      id: 'riskLevel',
+      header: 'Risk',
+      cell: (item) => (
+        <Badge
+          color={
+            riskBadgeColors[(item.riskLevel ?? '').toLowerCase()] ?? 'blue'
+          }
+        >
+          {titleCase(item.riskLevel)}
         </Badge>
       ),
     },
-    { id: 'status', header: 'Status', cell: (item: Alert) => item.status },
-    { id: 'resource', header: 'Resource', cell: (item: Alert) => item.resource },
-    { id: 'time', header: 'Time', cell: (item: Alert) => item.time },
+    {
+      id: 'tenantId',
+      header: 'Tenant',
+      cell: (item) => item.tenantId ?? '—',
+    },
+    {
+      id: 'receivedAt',
+      header: 'Received',
+      cell: (item) => formatDateTime(item.receivedAt),
+    },
+    {
+      id: 'updatedAt',
+      header: 'Updated',
+      cell: (item) => formatDateTime(item.updatedAt),
+    },
   ];
 
+  const selectedItems = useMemo(() => {
+    if (!selectedId) return [];
+    const match = items.find((item) => item.investigationId === selectedId);
+    return match ? [match] : [];
+  }, [items, selectedId]);
+
+  const flashItems = [];
+  if (error) {
+    flashItems.push({
+      type: 'warning' as const,
+      id: 'investigations-fallback',
+      header: 'Falling back to sample investigations',
+      content: 'The API is unreachable. Showing pre-seeded demo data for continuity.',
+    });
+  }
+
   return (
-    <Container header={<Header variant="h2">Active Alerts</Header>}>
-      <SpaceBetween size="s">
-        <FormField label="Filter">
-          <Input
-            value={filter}
-            onChange={(event: NonCancelableCustomEvent<InputProps.ChangeDetail>) => setFilter(event.detail.value)}
-            placeholder="Search by ID or vendor"
-          />
-        </FormField>
-        <Table<Alert>
-          trackBy="id"
-          selectionType="multi"
-          selectedItems={selectedItems}
-          onSelectionChange={(event: NonCancelableCustomEvent<TableProps.SelectionChangeDetail<Alert>>) => setSelectedItems([...event.detail.selectedItems])}
-          items={items}
-          columnDefinitions={columnDefinitions}
-          empty={<Box padding="s">No alerts</Box>}
+    <Container
+      id="investigations"
+      header={
+        <Header
+          variant="h2"
+          actions={
+            <SpaceBetween size="xs" direction="horizontal">
+              <StatusIndicator type={isFallback ? 'warning' : 'success'}>
+                {isFallback ? 'Demo data' : 'Live API'}
+              </StatusIndicator>
+              <Button
+                iconName="refresh"
+                onClick={onRefresh}
+                loading={loading}
+                disabled={loading}
+              >
+                Refresh
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          Investigations
+        </Header>
+      }
+    >
+      {flashItems.length ? <Flashbar items={flashItems} /> : null}
+      <Table<InvestigationSummary>
+        items={items}
+        columnDefinitions={columnDefinitions}
+        trackBy="investigationId"
+        selectionType="single"
+        selectedItems={selectedItems}
+        onSelectionChange={(
+          event: NonCancelableCustomEvent<
+            TableProps.SelectionChangeDetail<InvestigationSummary>
+          >,
+        ) => {
+          const next = event.detail.selectedItems[0];
+          onSelect(next ? next.investigationId : null);
+        }}
+        loading={loading}
+        loadingText="Loading investigations"
+        empty={<Box padding="s">No investigations available.</Box>}
+        resizableColumns
+        stickyHeader
+        wrapLines
+      />
+    </Container>
+  );
+};
+
+type InvestigationDetailPanelProps = {
+  investigationId: string | null;
+  detail: InvestigationDetail | undefined;
+  isLoading: boolean;
+  error: Error | null;
+  timeline: TimelineEvent[];
+  timelineLoading: boolean;
+  timelineError: Error | null;
+  onRefresh: () => void;
+  isFallback: boolean;
+};
+
+const InvestigationDetailPanel = ({
+  investigationId,
+  detail,
+  isLoading,
+  error,
+  timeline,
+  timelineLoading,
+  timelineError,
+  onRefresh,
+  isFallback,
+}: InvestigationDetailPanelProps) => {
+  if (!investigationId) {
+    return (
+      <Container header={<Header variant="h2">Investigation detail</Header>}>
+        <Box>Select an investigation from the table to view detail.</Box>
+      </Container>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <Container header={<Header variant="h2">Investigation detail</Header>}>
+        <StatusIndicator type="info">No detail available.</StatusIndicator>
+      </Container>
+    );
+  }
+
+  const riskLevel = (detail.riskLevel ?? detail.summary?.risk_level ?? 'unknown').toLowerCase();
+  const recommendedActions = detail.summary?.recommended_actions ?? [];
+  const confidence = detail.summary?.confidence;
+  const timelineItems = timeline.length
+    ? timeline
+    : normalizeTimelineData(undefined, detail.summary?.timeline);
+
+  const summaryTabContent = (
+    <SpaceBetween size="s">
+      {isLoading ? (
+        <Spinner size="large" />
+      ) : (
+        <Box variant="p">{detail.summary?.summary ?? 'Summary not available.'}</Box>
+      )}
+      {typeof confidence === 'number' ? (
+        <Badge color="blue">Confidence {Math.round(confidence * 100)}%</Badge>
+      ) : null}
+      {recommendedActions.length ? (
+        <Table<RecommendedAction>
+          columnDefinitions={[
+            {
+              id: 'action',
+              header: 'Action',
+              cell: (action) => action.action_id ?? '—',
+            },
+            {
+              id: 'description',
+              header: 'Description',
+              cell: (action) => action.description ?? '—',
+            },
+            {
+              id: 'rationale',
+              header: 'Rationale',
+              cell: (action) => action.rationale ?? '—',
+            },
+          ]}
+          items={recommendedActions}
+          trackBy="action_id"
+          wrapLines
+          resizableColumns
+          stickyHeader={false}
+          empty={<Box padding="s">No automated actions recommended.</Box>}
+        />
+      ) : (
+        <StatusIndicator type="info">No automated actions recommended.</StatusIndicator>
+      )}
+    </SpaceBetween>
+  );
+
+  const timelineTabContent = timelineLoading ? (
+    <Spinner size="large" />
+  ) : timelineItems.length ? (
+    <Table<TimelineEvent>
+      items={timelineItems.map((item, index) => ({
+        ...item,
+        id: item.id || `${investigationId}-${index}`,
+      }))}
+      columnDefinitions={[
+        {
+          id: 'timestamp',
+          header: 'Timestamp',
+          cell: (item) => formatDateTime(item.timestamp),
+        },
+        {
+          id: 'stage',
+          header: 'Stage',
+          cell: (item) => titleCase(item.stage),
+        },
+        {
+          id: 'detail',
+          header: 'Detail',
+          cell: (item) => item.detail || '—',
+        },
+        {
+          id: 'duration',
+          header: 'Duration (s)',
+          cell: (item) =>
+            item.durationSeconds != null ? item.durationSeconds.toString() : '—',
+        },
+      ]}
+      trackBy="id"
+      wrapLines
+      resizableColumns
+      stickyHeader
+      empty={<Box padding="s">No timeline events captured.</Box>}
+    />
+  ) : (
+    <StatusIndicator type="info">No timeline events captured.</StatusIndicator>
+  );
+
+  const contextTabContent = (
+    <Box padding="s">
+      <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+        {JSON.stringify(detail.context ?? {}, null, 2)}
+      </pre>
+    </Box>
+  );
+
+  const detailFlashItems = [];
+  if (error || isFallback) {
+    detailFlashItems.push({
+      type: 'warning' as const,
+      id: 'detail-fallback',
+      header: 'Detail powered by cached data',
+      content:
+        'The API detail endpoint was unavailable. Displaying the latest cached investigation detail.',
+    });
+  }
+  if (timelineError) {
+    detailFlashItems.push({
+      type: 'warning' as const,
+      id: 'timeline-fallback',
+      header: 'Timeline fallback',
+      content:
+        'Timeline events are pulled from the investigation summary because the live timeline endpoint is unavailable.',
+    });
+  }
+
+  return (
+    <Container
+      header={
+        <Header
+          variant="h2"
+          actions={
+            <Button
+              iconName="refresh"
+              onClick={onRefresh}
+              disabled={isLoading || timelineLoading}
+              loading={isLoading || timelineLoading}
+            >
+              Refresh detail
+            </Button>
+          }
+        >
+          Investigation detail
+        </Header>
+      }
+    >
+      {detailFlashItems.length ? <Flashbar items={detailFlashItems} /> : null}
+      <SpaceBetween size="m">
+        <ColumnLayout columns={3} variant="text-grid">
+          <Box>
+            <Box variant="awsui-key-label">Risk level</Box>
+            <StatusIndicator
+              type={riskIndicatorMap[riskLevel] ?? 'info'}
+            >
+              {titleCase(detail.riskLevel ?? detail.summary?.risk_level)}
+            </StatusIndicator>
+          </Box>
+          <Box>
+            <Box variant="awsui-key-label">Stage</Box>
+            <StatusIndicator
+              type={
+                stageIndicatorMap[(detail.stage ?? '').toLowerCase()] ?? 'info'
+              }
+            >
+              {titleCase(detail.stage)}
+            </StatusIndicator>
+          </Box>
+          <Box>
+            <Box variant="awsui-key-label">Tenant</Box>
+            <Box variant="p">{detail.tenantId ?? '—'}</Box>
+          </Box>
+          <Box>
+            <Box variant="awsui-key-label">Received</Box>
+            <Box variant="p">{formatDateTime(detail.receivedAt)}</Box>
+          </Box>
+          <Box>
+            <Box variant="awsui-key-label">Updated</Box>
+            <Box variant="p">{formatDateTime(detail.updatedAt)}</Box>
+          </Box>
+        </ColumnLayout>
+        <Tabs
+          tabs={[
+            { id: 'summary', label: 'Summary', content: summaryTabContent },
+            { id: 'timeline', label: 'Timeline', content: timelineTabContent },
+            { id: 'context', label: 'Context', content: contextTabContent },
+          ]}
         />
       </SpaceBetween>
     </Container>
   );
 };
 
-const IncidentModal = ({ open, onClose }: { open: boolean; onClose: () => void }) => (
-  <Modal
-    visible={open}
-    onDismiss={onClose}
-    closeAriaLabel="Close create incident modal"
-    header={<Header>Create Incident</Header>}
-  >
-    <SpaceBetween size="m">
-      <ColumnLayout columns={2} variant="text-grid">
-        <FormField label="Title">
-          <Input value="Suspicious login from TOR" readOnly />
-        </FormField>
-        <FormField label="Severity">
-          <Input value="High" readOnly />
-        </FormField>
-      </ColumnLayout>
-      <Button variant="primary" onClick={onClose}>
-        Create
-      </Button>
-    </SpaceBetween>
-  </Modal>
-);
-
 export default function App() {
   const [navigationOpen, setNavigationOpen] = useState(true);
-  const [createIncidentOpen, setCreateIncidentOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const appLayoutAriaLabels = {
-    navigation: 'Main navigation',
-    navigationToggle: 'Open navigation',
-    navigationClose: 'Close navigation',
-    notifications: 'Notifications',
+  const investigationsQuery = useQuery<InvestigationSummary[], Error>(
+    ['investigations'],
+    fetchInvestigations,
+    {
+      staleTime: 30_000,
+      refetchInterval: 60_000,
+      retry: 1,
+    },
+  );
+
+  const investigations = investigationsQuery.isError
+    ? FALLBACK_INVESTIGATIONS
+    : investigationsQuery.data ?? [];
+  const isInvestigationsFallback = investigationsQuery.isError;
+
+  useEffect(() => {
+    if (!investigations.length) {
+      setSelectedId(null);
+      return;
+    }
+    if (
+      !selectedId ||
+      !investigations.some(
+        (item: InvestigationSummary) => item.investigationId === selectedId,
+      )
+    ) {
+      setSelectedId(investigations[0].investigationId);
+    }
+  }, [investigations, selectedId]);
+
+  const detailQuery = useQuery<InvestigationDetail, Error>(
+    ['investigation', selectedId],
+    () => fetchInvestigationDetail(selectedId!),
+    {
+      enabled: Boolean(selectedId),
+      staleTime: 30_000,
+      retry: 1,
+    },
+  );
+
+  const timelineQuery = useQuery<TimelineEvent[], Error>(
+    ['investigation', 'timeline', selectedId],
+    () => fetchInvestigationTimeline(selectedId!),
+    {
+      enabled: Boolean(selectedId),
+      staleTime: 30_000,
+      retry: 1,
+    },
+  );
+
+  const detailData = selectedId
+    ? detailQuery.data ?? FALLBACK_DETAILS[selectedId]
+    : undefined;
+  const isDetailFallback = detailQuery.isError || (!detailQuery.data && !!detailData);
+  const timelineData = timelineQuery.data ?? [];
+
+  const refreshAll = () => {
+    investigationsQuery.refetch();
+    if (selectedId) {
+      detailQuery.refetch();
+      timelineQuery.refetch();
+    }
   };
+
+  const navItems = useMemo<SideNavigationProps['items']>(() => {
+    const totalBadge = (
+      <Badge color="blue">{investigations.length}</Badge>
+    );
+    return [
+      { type: 'link', text: 'Investigations', href: '#investigations', info: totalBadge },
+      ...defaultNavItems.slice(1),
+    ];
+  }, [investigations.length]);
 
   const topNav = (
     <TopNavigation
       identity={{
         href: '#',
-        title: 'Neo SOC',
+        title: 'NeoHarbourSecurity',
         logo: {
-          src: 'https://d1.awsstatic.com/webteam/architecture-icons/q1-2022/Arch-Category_Security-Identity-Compliance_64.1ba5b2f0d8d1f3f7b8f4f1f8b2f5f9d1.png',
-          alt: 'Neo SOC logo',
+          src: 'https://d1.awsstatic.com/logos/aws/cloudscape-design-dark.0804b1c3457f219c8bf4.svg',
+          alt: 'NeoHarbourSecurity logo',
         },
       }}
       utilities={[
@@ -271,18 +815,20 @@ export default function App() {
         },
         {
           type: 'button',
-          iconName: 'user-profile',
-          ariaLabel: 'Profile',
-        },
-        {
-          type: 'button',
           text: '',
-          ariaLabel: 'Open user menu',
-          iconSvg: <UserButton afterSignOutUrl="/" />, // Clerk renders the user menu
+          ariaLabel: 'User menu',
+          iconSvg: <UserButton afterSignOutUrl="/" />,
         } as any,
       ]}
     />
   );
+
+  const appLayoutAriaLabels = {
+    navigation: 'Main navigation',
+    navigationToggle: 'Open navigation',
+    navigationClose: 'Close navigation',
+    notifications: 'Notifications',
+  };
 
   return (
     <>
@@ -299,215 +845,70 @@ export default function App() {
           ariaLabels={appLayoutAriaLabels}
           navigation={
             <SideNavigation
-              activeHref="#alerts"
+              activeHref="#investigations"
               items={navItems}
               header={{ text: 'Neo SOC', href: '#' }}
             />
           }
           navigationOpen={navigationOpen}
           onNavigationChange={(event: NavigationChangeEvent) => setNavigationOpen(event.detail.open)}
-          breadcrumbs={<BreadcrumbGroup items={[{ text: 'Home', href: '#' }, { text: 'Alerts', href: '#alerts' }]} />}
+          breadcrumbs={
+            <BreadcrumbGroup
+              items={[{ text: 'Home', href: '#' }, { text: 'Investigations', href: '#investigations' }]}
+            />
+          }
           content={
             <ContentLayout
               header={
                 <Header
                   variant="h1"
-                  actions={<Button onClick={() => setCreateIncidentOpen(true)}>New Incident</Button>}
+                  actions={
+                    <Button
+                      iconName="refresh"
+                      onClick={refreshAll}
+                      loading={investigationsQuery.isFetching || detailQuery.isFetching || timelineQuery.isFetching}
+                    >
+                      Refresh all
+                    </Button>
+                  }
                 >
-                  SOC Overview
+                  SOC command overview
                 </Header>
               }
             >
               <SpaceBetween size="l">
-                <AlertsTable />
-                <QuickSightPanel embedUrl={undefined /* supply from backend */} />
-                <Container header={<Header variant="h2">Docs &amp; Links</Header>}>
-                  <SpaceBetween size="s">
-                    <Link external href="#">
-                      Runbooks
-                    </Link>
-                    <Link external href="#">
-                      API Reference
-                    </Link>
-                    <Link external href="#">
-                      Status Page
-                    </Link>
-                  </SpaceBetween>
-                </Container>
+                <InvestigationMetrics
+                  items={investigations}
+                  isFallback={isInvestigationsFallback}
+                />
+                <InvestigationsTable
+                  items={investigations}
+                  loading={investigationsQuery.isFetching}
+                  error={investigationsQuery.error ?? null}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  onRefresh={() => investigationsQuery.refetch()}
+                  isFallback={isInvestigationsFallback}
+                />
+                <InvestigationDetailPanel
+                  investigationId={selectedId}
+                  detail={detailData}
+                  isLoading={detailQuery.isFetching}
+                  error={detailQuery.error ?? null}
+                  timeline={timelineData}
+                  timelineLoading={timelineQuery.isFetching}
+                  timelineError={timelineQuery.error ?? null}
+                  onRefresh={() => {
+                    detailQuery.refetch();
+                    timelineQuery.refetch();
+                  }}
+                  isFallback={isDetailFallback}
+                />
               </SpaceBetween>
             </ContentLayout>
           }
         />
-        <IncidentModal open={createIncidentOpen} onClose={() => setCreateIncidentOpen(false)} />
       </SignedIn>
     </>
   );
 }
-
-/* --- Integration Notes ---
-1) Install deps:
-   npm i @cloudscape-design/components@3.0.1093 @clerk/clerk-react amazon-quicksight-embedding-sdk
-
-2) (Optional) Bring in Cloudscape global styles when the package is accessible:
-   import '@cloudscape-design/global-styles/index.css';
-   // If you are offline, keep relying on the local baseline styles defined in src/index.css.
-
-3) Wrap root with ClerkProvider (index/main):
-   import { ClerkProvider } from '@clerk/clerk-react';
-   ReactDOM.createRoot(document.getElementById('root')!).render(
-     <ClerkProvider publishableKey={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY}>
-       <App />
-     </ClerkProvider>
-   );
-
-4) QuickSight embed URL: obtain server-side via AWS SDK (GenerateEmbedUrlForRegisteredUser or AnonymousUser), return to frontend and pass into <QuickSightPanel embedUrl={url} />.
-
-5) Optional: Tailwind can coexist; Cloudscape controls layout/UX patterns.
-*/
-
-// ================================
-// Backend: QuickSight Embed Signer
-// ================================
-// Minimal Node/Express service using AWS SDK v3 to generate QuickSight Embed URLs
-// Endpoints provided:
-//   - GET /api/qs-url/registered?dashboardId=...&userArn=... (preferred for signed-in QS users)
-//   - GET /api/qs-url/anonymous?dashboardId=... (for PoC/anonymous embed; enable in QS settings)
-//
-// ---------- Setup ----------
-// 1) npm i express cors dotenv @aws-sdk/client-quicksight
-// 2) Create .env with:
-//    AWS_REGION=ap-southeast-1
-//    AWS_ACCESS_KEY_ID=...
-//    AWS_SECRET_ACCESS_KEY=...
-//    # Optional if using STS:
-//    # AWS_SESSION_TOKEN=...
-//    QS_AWS_ACCOUNT_ID=123456789012
-//    QS_NAMESPACE=default
-//    QS_ALLOWED_DOMAIN=http://localhost:5173
-//    # Optional default dashboard and user for quick testing
-//    QS_DASHBOARD_ID=your-dashboard-id
-//    QS_USER_ARN=arn:aws:quicksight:ap-southeast-1:123456789012:user/default/neo-soc-user
-// 3) Ensure your IAM role has QuickSight permissions for the chosen API(s).
-// 4) Run: node server.js   (or ts-node server.ts)
-//
-// ---------- server.ts / server.js ----------
-/*
-Minimal signer service example (TypeScript)
-```ts
-import express from 'express';
-import cors from 'cors';
-import 'dotenv/config';
-import {
-  GenerateEmbedUrlForAnonymousUserCommand,
-  GenerateEmbedUrlForRegisteredUserCommand,
-  QuickSightClient,
-} from '@aws-sdk/client-quicksight';
-
-const app = express();
-app.use(cors({ origin: process.env.QS_ALLOWED_DOMAIN?.split(',') || true }));
-app.use(express.json());
-
-const REGION = process.env.AWS_REGION || 'ap-southeast-1';
-const ACCOUNT_ID = process.env.QS_AWS_ACCOUNT_ID as string; // required
-const NAMESPACE = process.env.QS_NAMESPACE || 'default';
-const DEFAULT_DASHBOARD_ID = process.env.QS_DASHBOARD_ID;
-const DEFAULT_USER_ARN = process.env.QS_USER_ARN; // for registered user flow
-
-if (!ACCOUNT_ID) {
-  console.error('Missing QS_AWS_ACCOUNT_ID');
-  process.exit(1);
-}
-
-const qs = new QuickSightClient({ region: REGION });
-
-app.get('/health', (_req, res) => res.json({ ok: true }));
-
-app.get('/api/qs-url/registered', async (req, res) => {
-  try {
-    const dashboardId = (req.query.dashboardId as string) || DEFAULT_DASHBOARD_ID;
-    const userArn = (req.query.userArn as string) || DEFAULT_USER_ARN;
-
-    if (!dashboardId) return res.status(400).json({ error: 'dashboardId is required' });
-    if (!userArn) return res.status(400).json({ error: 'userArn is required' });
-
-    const cmd = new GenerateEmbedUrlForRegisteredUserCommand({
-      AwsAccountId: ACCOUNT_ID,
-      ExperienceConfiguration: {
-        Dashboard: {
-          InitialDashboardId: dashboardId,
-        },
-      },
-      UserArn: userArn,
-      SessionLifetimeInMinutes: 600,
-      AllowedDomains: process.env.QS_ALLOWED_DOMAIN ? process.env.QS_ALLOWED_DOMAIN.split(',') : undefined,
-    });
-
-    const resp = await qs.send(cmd);
-    return res.json({ embedUrl: resp.EmbedUrl, expiresAt: resp.Expiration });
-  } catch (err) {
-    console.error('registered error', err);
-    const message = err instanceof Error ? err.message : 'failed to generate embed url';
-    return res.status(500).json({ error: message });
-  }
-});
-
-app.get('/api/qs-url/anonymous', async (req, res) => {
-  try {
-    const dashboardId = (req.query.dashboardId as string) || DEFAULT_DASHBOARD_ID;
-    if (!dashboardId) return res.status(400).json({ error: 'dashboardId is required' });
-
-    const cmd = new GenerateEmbedUrlForAnonymousUserCommand({
-      AwsAccountId: ACCOUNT_ID,
-      Namespace: NAMESPACE,
-      AuthorizedResourceArns: [
-        `arn:aws:quicksight:${REGION}:${ACCOUNT_ID}:dashboard/${dashboardId}`,
-      ],
-      ExperienceConfiguration: {
-        Dashboard: {
-          InitialDashboardId: dashboardId,
-        },
-      },
-      SessionLifetimeInMinutes: 600,
-      AllowedDomains: process.env.QS_ALLOWED_DOMAIN ? process.env.QS_ALLOWED_DOMAIN.split(',') : undefined,
-    });
-
-    const resp = await qs.send(cmd);
-    return res.json({ embedUrl: resp.EmbedUrl, expiresAt: resp.Expiration });
-  } catch (err) {
-    console.error('anonymous error', err);
-    const message = err instanceof Error ? err.message : 'failed to generate embed url';
-    return res.status(500).json({ error: message });
-  }
-});
-
-const port = Number(process.env.PORT) || 8787;
-app.listen(port, () => console.log(`[qs-signer] listening on :${port}`));
-```
-*/
-
-// ---------- Frontend glue (already in App.tsx) ----------
-// fetch('/api/qs-url/anonymous?dashboardId=...').then(r => r.json()).then(({ embedUrl }) => setState(embedUrl));
-
-// ---------- Minimal IAM Policy Hints ----------
-// {
-//   "Version": "2012-10-17",
-//   "Statement": [
-//     {
-//       "Effect": "Allow",
-//       "Action": [
-//         "quicksight:GenerateEmbedUrlForRegisteredUser",
-//         "quicksight:GenerateEmbedUrlForAnonymousUser"
-//       ],
-//       "Resource": "*"
-//     }
-//   ]
-// }
-
-// Notes:
-// - Registered flow requires the QuickSight user to exist; you can automate provisioning via RegisterUser API or Console.
-// - Anonymous flow requires enabling in QS admin and mapping dashboards to namespaces.
-// - Always restrict AllowedDomains and IAM resources in production.
-
-// 主框架：Cloudscape Design System → 打造「SOC 控制台」级体验。
-// 认证/注册：根据后端选型，前期可用 Clerk 展示层。
-// 后续集成 QuickSight Embedding SDK（BI 报表）来展示趋势和 KPI。

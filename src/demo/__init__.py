@@ -1,0 +1,1 @@
+"""Demo data generation infrastructure for NeoHarbour Security interactive demonstrations."""

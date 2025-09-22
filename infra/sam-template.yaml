@@ -19,6 +19,7 @@ Globals:
         LOG_LEVEL: INFO
         DDB_INVESTIGATIONS_TABLE: !Ref InvestigationsTable
         DDB_METRICS_TABLE: !Ref MetricsTable
+        DDB_DEMO_SESSIONS_TABLE: !Ref DemoSessionsTable
         ARTIFACTS_BUCKET: !Ref ArtifactsBucket
         AUDIT_BUCKET: !Ref AuditBucket
         KMS_KEY_ID: !Ref ArtifactsKey
@@ -206,6 +207,39 @@ Resources:
       KeySchema:
         - AttributeName: agent_name
           KeyType: HASH
+
+  DemoSessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub AsiaAgenticSocDemoSessions-${StageName}
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+        KMSMasterKeyId: !Ref ArtifactsKey
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: session_id
+          AttributeType: S
+        - AttributeName: tenant_id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: session_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: TenantStatusIndex
+          KeySchema:
+            - AttributeName: tenant_id
+              KeyType: HASH
+            - AttributeName: status
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
 
   InvestigationBus:
     Type: AWS::Events::EventBus
@@ -473,6 +507,59 @@ Resources:
                 - kms:GenerateDataKey*
               Resource: !Ref ArtifactsKey
 
+  DemoSessionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub AsiaAgenticSoc-DemoSession-${StageName}
+      Handler: demo.api.handler
+      Description: API handler for demo session management operations.
+      Timeout: 60
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DemoSessionsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+              Resource: !Ref ArtifactsKey
+      Events:
+        DemoSessionsApi:
+          Type: Api
+          Properties:
+            Path: /demo/sessions
+            Method: ANY
+        DemoSessionApi:
+          Type: Api
+          Properties:
+            Path: /demo/sessions/{session_id}
+            Method: ANY
+        DemoSessionParametersApi:
+          Type: Api
+          Properties:
+            Path: /demo/sessions/{session_id}/parameters
+            Method: PUT
+        DemoSessionStatusApi:
+          Type: Api
+          Properties:
+            Path: /demo/sessions/{session_id}/status
+            Method: PUT
+        DemoSessionMetricsApi:
+          Type: Api
+          Properties:
+            Path: /demo/sessions/{session_id}/metrics
+            Method: PUT
+        DemoPresetsApi:
+          Type: Api
+          Properties:
+            Path: /demo/presets
+            Method: GET
+        DemoCleanupApi:
+          Type: Api
+          Properties:
+            Path: /demo/cleanup
+            Method: POST
+
   PipelineDashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
@@ -544,6 +631,9 @@ Outputs:
   MetricsTableName:
     Description: DynamoDB table storing KPI aggregates.
     Value: !Ref MetricsTable
+  DemoSessionsTableName:
+    Description: DynamoDB table storing demo session data.
+    Value: !Ref DemoSessionsTable
   ArtifactsBucketName:
     Description: S3 bucket for AI artifacts and reports.
     Value: !Ref ArtifactsBucket

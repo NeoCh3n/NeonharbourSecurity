@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List
@@ -10,6 +11,9 @@ from urllib.parse import urlparse
 
 from .data import PIPELINE_STAGES, InvestigationRepository
 from ..agents.automation_metrics import automation_tracker
+from ..metrics.collector import metrics_collector
+from ..metrics.roi_calculator import roi_calculator
+from ..metrics.dashboard import dashboard_aggregator
 
 _REPOSITORY = InvestigationRepository()
 
@@ -34,6 +38,10 @@ class SocRequestHandler(BaseHTTPRequestHandler):
                 self._handle_investigation_route(segments[1:])
             elif head == "automation":
                 self._handle_automation_route(segments[1:])
+            elif head == "metrics":
+                self._handle_metrics_route(segments[1:])
+            elif head == "dashboard":
+                self._handle_dashboard_route(segments[1:])
             else:
                 self._send_json(HTTPStatus.NOT_FOUND, {"detail": "Unknown endpoint"})
         except Exception as exc:  # pragma: no cover - defensive programming
@@ -152,6 +160,193 @@ class SocRequestHandler(BaseHTTPRequestHandler):
             
         else:
             self._send_json(HTTPStatus.NOT_FOUND, {"detail": "Unknown automation endpoint"})
+
+    def _handle_metrics_route(self, segments: List[str]) -> None:
+        """Handle metrics endpoints for real-time data."""
+        if not segments:
+            self._send_json(HTTPStatus.NOT_FOUND, {"detail": "Metrics endpoint requires subpath"})
+            return
+            
+        subroute = segments[0].lower()
+        
+        if subroute == "realtime":
+            # Get query parameters (simplified - in production would use proper URL parsing)
+            tenant_id = "default"  # Default tenant for demo
+            time_window_hours = 24  # Default to 24 hours
+            
+            try:
+                # Get real-time automation metrics
+                automation_metrics = metrics_collector.get_realtime_automation_metrics(
+                    tenant_id, time_window_hours
+                )
+                
+                # Get efficiency metrics
+                efficiency_metrics = metrics_collector.get_efficiency_metrics(
+                    tenant_id, time_window_hours
+                )
+                
+                # Get confidence distribution
+                confidence_dist = metrics_collector.get_confidence_distribution(
+                    tenant_id, time_window_hours
+                )
+                
+                response = {
+                    "realtime_metrics": {
+                        "automation": {
+                            "automation_rate": automation_metrics.automation_rate,
+                            "total_investigations": automation_metrics.total_investigations,
+                            "auto_closed_count": automation_metrics.auto_closed_count,
+                            "escalated_count": automation_metrics.escalated_count,
+                            "monitoring_count": automation_metrics.monitoring_count,
+                            "target_met": automation_metrics.target_met,
+                            "avg_processing_time_minutes": automation_metrics.avg_processing_time / 60.0
+                        },
+                        "efficiency": {
+                            "time_saved_hours": efficiency_metrics.time_saved_hours,
+                            "cost_savings_usd": efficiency_metrics.cost_savings_estimate,
+                            "analyst_hours_saved": efficiency_metrics.analyst_hours_saved,
+                            "efficiency_improvement": efficiency_metrics.efficiency_improvement
+                        },
+                        "confidence": confidence_dist,
+                        "timestamp": automation_metrics.period_end.isoformat(),
+                        "time_window_hours": time_window_hours
+                    }
+                }
+                
+                self._send_json(HTTPStatus.OK, response)
+                
+            except Exception as e:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                    "detail": "Error retrieving real-time metrics",
+                    "error": str(e)
+                })
+                
+        elif subroute == "roi":
+            # ROI calculation endpoint
+            tenant_id = "default"
+            period_days = 30  # Default to 30 days
+            
+            try:
+                roi_report = roi_calculator.generate_roi_report(
+                    tenant_id, period_days, include_projections=True
+                )
+                
+                self._send_json(HTTPStatus.OK, roi_report)
+                
+            except Exception as e:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                    "detail": "Error calculating ROI metrics",
+                    "error": str(e)
+                })
+                
+        else:
+            self._send_json(HTTPStatus.NOT_FOUND, {"detail": "Unknown metrics endpoint"})
+
+    def _handle_dashboard_route(self, segments: List[str]) -> None:
+        """Handle dashboard data endpoints."""
+        if not segments:
+            self._send_json(HTTPStatus.NOT_FOUND, {"detail": "Dashboard endpoint requires subpath"})
+            return
+            
+        subroute = segments[0].lower()
+        tenant_id = "default"  # Default tenant for demo
+        
+        if subroute == "summary":
+            # Real-time dashboard summary
+            try:
+                summary = dashboard_aggregator.get_realtime_summary(tenant_id)
+                self._send_json(HTTPStatus.OK, summary)
+                
+            except Exception as e:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                    "detail": "Error retrieving dashboard summary",
+                    "error": str(e)
+                })
+                
+        elif subroute == "data":
+            # Full dashboard data
+            time_window_hours = 24  # Default to 24 hours
+            
+            try:
+                dashboard_data = dashboard_aggregator.get_dashboard_data(
+                    tenant_id, time_window_hours
+                )
+                
+                # Convert to dictionary for JSON serialization
+                response = {
+                    "dashboard_data": {
+                        "automation_rate": dashboard_data.automation_rate,
+                        "total_investigations": dashboard_data.total_investigations,
+                        "auto_closed_count": dashboard_data.auto_closed_count,
+                        "escalated_count": dashboard_data.escalated_count,
+                        "monitoring_count": dashboard_data.monitoring_count,
+                        "avg_processing_time_minutes": dashboard_data.avg_processing_time_minutes,
+                        "time_saved_hours": dashboard_data.time_saved_hours,
+                        "cost_savings_usd": dashboard_data.cost_savings_usd,
+                        "analyst_hours_saved": dashboard_data.analyst_hours_saved,
+                        "avg_confidence_score": dashboard_data.avg_confidence_score,
+                        "avg_fp_probability": dashboard_data.avg_fp_probability,
+                        "accuracy_rate": dashboard_data.accuracy_rate,
+                        "target_automation_rate": dashboard_data.target_automation_rate,
+                        "target_met": dashboard_data.target_met,
+                        "target_progress": dashboard_data.target_progress,
+                        "hourly_automation_rates": dashboard_data.hourly_automation_rates,
+                        "hourly_investigation_counts": dashboard_data.hourly_investigation_counts,
+                        "hourly_processing_times": dashboard_data.hourly_processing_times,
+                        "last_updated": dashboard_data.last_updated.isoformat(),
+                        "time_window_hours": dashboard_data.time_window_hours,
+                        "tenant_id": dashboard_data.tenant_id
+                    }
+                }
+                
+                self._send_json(HTTPStatus.OK, response)
+                
+            except Exception as e:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                    "detail": "Error retrieving dashboard data",
+                    "error": str(e)
+                })
+                
+        elif subroute == "trends":
+            # Trend data for charts
+            hours = 24  # Default to 24 hours
+            granularity = "hourly"  # Default granularity
+            
+            try:
+                trend_data = dashboard_aggregator.get_trend_data(
+                    tenant_id, hours, granularity
+                )
+                
+                self._send_json(HTTPStatus.OK, {
+                    "trend_data": trend_data,
+                    "metadata": {
+                        "tenant_id": tenant_id,
+                        "hours": hours,
+                        "granularity": granularity,
+                        "generated_at": datetime.now(timezone.utc).isoformat()
+                    }
+                })
+                
+            except Exception as e:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                    "detail": "Error retrieving trend data",
+                    "error": str(e)
+                })
+                
+        elif subroute == "performance":
+            # Executive performance summary
+            try:
+                performance_summary = dashboard_aggregator.get_performance_summary(tenant_id)
+                self._send_json(HTTPStatus.OK, performance_summary)
+                
+            except Exception as e:
+                self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                    "detail": "Error retrieving performance summary",
+                    "error": str(e)
+                })
+                
+        else:
+            self._send_json(HTTPStatus.NOT_FOUND, {"detail": "Unknown dashboard endpoint"})
 
     # ------------------------------------------------------------------
     def _send_json(self, status: HTTPStatus, payload: Dict[str, Any]) -> None:

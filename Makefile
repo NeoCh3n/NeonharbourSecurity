@@ -7,7 +7,7 @@ STREAMLIT ?= streamlit
 
 help:
 	@echo "Available targets: bootstrap deploy demo teardown fmt test lint compliance"
-	@echo "Additional: api"
+	@echo "Additional: api metrics-demo"
 
 bootstrap:
 	$(PIP) install -r requirements.txt
@@ -39,3 +39,6 @@ compliance:
 
 api:
 	$(PYTHON) -m src.api.server --host 0.0.0.0 --port 4000
+
+metrics-demo:
+	$(PYTHON) tools/metrics/demo_metrics_collection.py

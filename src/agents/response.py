@@ -11,6 +11,7 @@ import boto3
 from ..pipeline.journal import log_stage_event
 from .base import Agent, EscalationDecision
 from .automation_metrics import automation_tracker
+from ..metrics.collector import metrics_collector
 
 DDB_TABLE = os.getenv("DDB_INVESTIGATIONS_TABLE", "AsiaAgenticSocInvestigations-dev")
 METRICS_TABLE = os.getenv("DDB_METRICS_TABLE", "AsiaAgenticSocMetrics-dev")
@@ -92,7 +93,7 @@ class ResponseAgent(Agent):
             },
         )
 
-        # Record automation metrics
+        # Record automation metrics (legacy)
         confidence_metrics = summary.get("confidence_metrics", {})
         automation_tracker.record_automation_decision(
             tenant_id=tenant_id,
@@ -101,6 +102,23 @@ class ResponseAgent(Agent):
             confidence_score=confidence_metrics.get("overall_confidence", 0.5),
             false_positive_probability=confidence_metrics.get("false_positive_probability", 0.5),
             escalated=escalation_decision.should_escalate
+        )
+        
+        # Record enhanced metrics for real-time dashboard
+        processing_time = self._calculate_processing_time(event)
+        metrics_collector.record_investigation_outcome(
+            investigation_id=investigation_id,
+            tenant_id=tenant_id,
+            outcome="auto_closed" if escalation_decision.automation_action == "auto_close" else 
+                   ("escalated" if escalation_decision.should_escalate else "monitoring"),
+            confidence_score=confidence_metrics.get("overall_confidence", 0.5),
+            false_positive_probability=confidence_metrics.get("false_positive_probability", 0.5),
+            processing_time_seconds=processing_time,
+            automation_decision=escalation_decision.automation_action,
+            escalated_to_human=escalation_decision.should_escalate,
+            risk_level=risk_assessment["level"],
+            scenario_type=event.get("alert", {}).get("scenarioType"),
+            is_demo=event.get("alert", {}).get("isDemo", False)
         )
 
         self.emit({
@@ -264,6 +282,15 @@ class ResponseAgent(Agent):
             "FPR": float(event.get("falsePositiveRate", 0.0)),
         }
         return metrics
+
+    def _calculate_processing_time(self, event: Dict[str, Any]) -> float:
+        """Calculate total processing time for the investigation."""
+        received = self._parse_ts(event.get("receivedAt"))
+        current_time = datetime.now(timezone.utc)
+        
+        if received:
+            return (current_time - received).total_seconds()
+        return 0.0
 
     @staticmethod
     def _parse_ts(value):

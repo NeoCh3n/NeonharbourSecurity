@@ -22,7 +22,7 @@ import {
 import type {
   BadgeProps,
   NonCancelableCustomEvent,
-  SideNavigationProps,
+
   StatusIndicatorProps,
   TableProps,
 } from '@cloudscape-design/components';
@@ -33,9 +33,15 @@ import {
   SignInButton,
   UserButton,
 } from '@clerk/clerk-react';
+import { useAuth, PERMISSIONS } from './hooks/useAuth';
+import { useApiClient } from './lib/api';
+import { RequirePermission } from './components/ProtectedComponent';
+import { useSessionManager } from './hooks/useSessionManager';
+import { AdminUserManagement } from './components/AdminUserManagement';
+import { AuthTest } from './components/AuthTest';
+import { AuthConfig } from './components/AuthConfig';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000';
-const DEMO_TOKEN = import.meta.env.VITE_DEMO_AUTH_TOKEN ?? 'change-me';
+// Remove the old API constants - now handled by useApiClient
 
 type RecommendedAction = {
   action_id?: string;
@@ -189,14 +195,50 @@ const stageIndicatorMap: Record<string, StatusIndicatorProps.Type> = {
   closed: 'success',
 };
 
-const defaultNavItems: SideNavigationProps.Item[] = [
-  { type: 'link', text: 'Investigations', href: '#investigations' },
-  { type: 'link', text: 'Automations', href: '#automations' },
-  { type: 'link', text: 'Compliance', href: '#compliance' },
-  { type: 'divider' },
-  { type: 'link', text: 'Analytics', href: '#analytics' },
-  { type: 'link', text: 'Settings', href: '#settings' },
-];
+const createNavItems = (user: ReturnType<typeof useAuth>['user']) => {
+  const items: any[] = [];
+
+  // Always show investigations if user has permission
+  if (user?.permissions.includes(PERMISSIONS.VIEW_INVESTIGATIONS)) {
+    items.push({ type: 'link', text: 'Investigations', href: '#investigations' });
+  }
+
+  // Demo controls for demo users and analysts
+  if (user?.permissions.includes(PERMISSIONS.START_DEMO)) {
+    items.push({ type: 'link', text: 'Demo Controls', href: '#demo' });
+  }
+
+  // Automations for analysts and admins
+  if (user?.permissions.includes(PERMISSIONS.MODIFY_INVESTIGATIONS)) {
+    items.push({ type: 'link', text: 'Automations', href: '#automations' });
+  }
+
+  // Compliance for all users
+  items.push({ type: 'link', text: 'Compliance', href: '#compliance' });
+
+  items.push({ type: 'divider' });
+
+  // Analytics for users with metrics permission
+  if (user?.permissions.includes(PERMISSIONS.VIEW_DEMO_METRICS)) {
+    items.push({ type: 'link', text: 'Analytics', href: '#analytics' });
+  }
+
+  // Admin section
+  if (user?.permissions.includes(PERMISSIONS.MANAGE_USERS)) {
+    items.push({ type: 'link', text: 'User Management', href: '#admin/users' });
+  }
+
+  if (user?.permissions.includes(PERMISSIONS.CONFIGURE_SYSTEM)) {
+    items.push({ type: 'link', text: 'System Config', href: '#admin/system' });
+  }
+
+  // Settings for all authenticated users
+  if (user) {
+    items.push({ type: 'link', text: 'Settings', href: '#settings' });
+  }
+
+  return items;
+};
 
 const SignedOutView = () => (
   <Box textAlign="center" padding="xxl">
@@ -224,38 +266,44 @@ const titleCase = (value?: string) => {
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
-async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      Authorization: `Bearer ${DEMO_TOKEN}`,
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`);
-  }
-  return response.json() as Promise<T>;
-}
+// API functions now use the authenticated API client
+const createApiFunctions = (apiClient: ReturnType<typeof useApiClient>) => ({
+  fetchInvestigations: async (): Promise<InvestigationSummary[]> => {
+    try {
+      const payload = await apiClient.get<unknown>(`/investigations`);
+      if (Array.isArray(payload)) {
+        return payload as InvestigationSummary[];
+      }
+      if (payload && typeof payload === 'object' && 'items' in payload) {
+        const { items } = payload as { items?: InvestigationSummary[] };
+        return items ?? [];
+      }
+      return [];
+    } catch (error) {
+      console.error('Failed to fetch investigations:', error);
+      throw error;
+    }
+  },
 
-const fetchInvestigations = async (): Promise<InvestigationSummary[]> => {
-  const payload = await fetchJson<unknown>(`/investigations`);
-  if (Array.isArray(payload)) {
-    return payload as InvestigationSummary[];
-  }
-  if (payload && typeof payload === 'object' && 'items' in payload) {
-    const { items } = payload as { items?: InvestigationSummary[] };
-    return items ?? [];
-  }
-  return [];
-};
+  fetchInvestigationDetail: async (id: string): Promise<InvestigationDetail> => {
+    try {
+      return await apiClient.get<InvestigationDetail>(`/investigations/${id}`);
+    } catch (error) {
+      console.error('Failed to fetch investigation detail:', error);
+      throw error;
+    }
+  },
 
-const fetchInvestigationDetail = async (id: string): Promise<InvestigationDetail> => {
-  return fetchJson<InvestigationDetail>(`/investigations/${id}`);
-};
-
-const fetchInvestigationTimeline = async (id: string): Promise<TimelineEvent[]> => {
-  const payload = await fetchJson<unknown>(`/investigations/${id}/timeline`);
-  return normalizeTimelineData(payload);
-};
+  fetchInvestigationTimeline: async (id: string): Promise<TimelineEvent[]> => {
+    try {
+      const payload = await apiClient.get<unknown>(`/investigations/${id}/timeline`);
+      return normalizeTimelineData(payload);
+    } catch (error) {
+      console.error('Failed to fetch investigation timeline:', error);
+      throw error;
+    }
+  }
+});
 
 const normalizeTimelineData = (
   raw: unknown,
@@ -264,10 +312,10 @@ const normalizeTimelineData = (
   const rawItems = Array.isArray(raw)
     ? raw
     : Array.isArray((raw as { items?: unknown[] })?.items)
-    ? ((raw as { items?: unknown[] }).items as unknown[])
-    : Array.isArray((raw as { results?: unknown[] })?.results)
-    ? ((raw as { results?: unknown[] }).results as unknown[])
-    : [];
+      ? ((raw as { items?: unknown[] }).items as unknown[])
+      : Array.isArray((raw as { results?: unknown[] })?.results)
+        ? ((raw as { results?: unknown[] }).results as unknown[])
+        : [];
   const source = rawItems.length ? rawItems : fallback ?? [];
   return source.map((entry, index) => {
     const record = (entry || {}) as Record<string, unknown>;
@@ -290,8 +338,8 @@ const normalizeTimelineData = (
       typeof detailValue === 'string'
         ? detailValue
         : detailValue
-        ? JSON.stringify(detailValue, null, 2)
-        : '';
+          ? JSON.stringify(detailValue, null, 2)
+          : '';
     return {
       id: (record.id as string) ?? `${rawStage}-${index}`,
       timestamp: rawTimestamp,
@@ -718,13 +766,20 @@ const InvestigationDetailPanel = ({
 export default function App() {
   const [navigationOpen, setNavigationOpen] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [currentView, setCurrentView] = useState('investigations');
+
+  const { user, hasPermission } = useAuth();
+  useSessionManager(); // Initialize session management
+  const apiClient = useApiClient();
+  const apiFunctions = useMemo(() => createApiFunctions(apiClient), [apiClient]);
 
   const investigationsQuery = useQuery<InvestigationSummary[], Error>({
     queryKey: ['investigations'],
-    queryFn: fetchInvestigations,
+    queryFn: apiFunctions.fetchInvestigations,
     staleTime: 30_000,
     refetchInterval: 60_000,
     retry: 1,
+    enabled: hasPermission(PERMISSIONS.VIEW_INVESTIGATIONS)
   });
 
   const investigations: InvestigationSummary[] = investigationsQuery.isError
@@ -749,16 +804,16 @@ export default function App() {
 
   const detailQuery = useQuery<InvestigationDetail, Error>({
     queryKey: ['investigation', selectedId],
-    queryFn: () => fetchInvestigationDetail(selectedId!),
-    enabled: Boolean(selectedId),
+    queryFn: () => apiFunctions.fetchInvestigationDetail(selectedId!),
+    enabled: Boolean(selectedId) && hasPermission(PERMISSIONS.VIEW_INVESTIGATIONS),
     staleTime: 30_000,
     retry: 1,
   });
 
   const timelineQuery = useQuery<TimelineEvent[], Error>({
     queryKey: ['investigation', 'timeline', selectedId],
-    queryFn: () => fetchInvestigationTimeline(selectedId!),
-    enabled: Boolean(selectedId),
+    queryFn: () => apiFunctions.fetchInvestigationTimeline(selectedId!),
+    enabled: Boolean(selectedId) && hasPermission(PERMISSIONS.VIEW_INVESTIGATIONS),
     staleTime: 30_000,
     retry: 1,
   });
@@ -777,15 +832,33 @@ export default function App() {
     }
   };
 
-  const navItems = useMemo<SideNavigationProps['items']>(() => {
-    const totalBadge = (
-      <Badge color="blue">{investigations.length}</Badge>
-    );
-    return [
-      { type: 'link', text: 'Investigations', href: '#investigations', info: totalBadge },
-      ...defaultNavItems.slice(1),
-    ];
-  }, [investigations.length]);
+  const navItems = useMemo(() => {
+    const baseItems = createNavItems(user);
+
+    // Add investigation count badge if investigations are visible
+    const investigationsItem = baseItems.find((item: any) => item.text === 'Investigations');
+    if (investigationsItem && investigations.length > 0) {
+      investigationsItem.info = <Badge color="blue">{investigations.length}</Badge>;
+    }
+
+    // Add click handlers for navigation
+    const itemsWithHandlers = baseItems.map((item: any) => {
+      if (item.type === 'divider') return item;
+
+      return {
+        ...item,
+        href: item.href, // Keep href for proper navigation
+        onClick: () => {
+          if (item.text === 'Investigations') setCurrentView('investigations');
+          else if (item.text === 'User Management') setCurrentView('admin-users');
+          else if (item.text === 'Demo Controls') setCurrentView('demo');
+          else if (item.text === 'Settings') setCurrentView('auth-test');
+        }
+      };
+    });
+
+    return itemsWithHandlers;
+  }, [user, investigations.length]);
 
   const topNav = (
     <TopNavigation
@@ -799,14 +872,18 @@ export default function App() {
       }}
       utilities={[
         { type: 'button', text: 'Docs', href: '#docs' },
-        {
-          type: 'menu-dropdown',
-          text: 'Account',
+        ...(user ? [{
+          type: 'menu-dropdown' as const,
+          text: user.email || 'Account',
+          description: `Role: ${user.role}${user.isDemo ? ' (Demo)' : ''}`,
           items: [
             { id: 'profile', text: 'Profile' },
-            { id: 'billing', text: 'Billing' },
+            { id: 'role', text: `Role: ${user.role}`, disabled: true },
+            ...(user.permissions.includes(PERMISSIONS.CONFIGURE_SYSTEM) ? [
+              { id: 'admin', text: 'Admin Panel' }
+            ] : []),
           ],
-        },
+        }] : []),
         {
           type: 'button',
           text: '',
@@ -839,7 +916,7 @@ export default function App() {
           ariaLabels={appLayoutAriaLabels}
           navigation={
             <SideNavigation
-              activeHref="#investigations"
+              activeHref={`#${currentView}`}
               items={navItems}
               header={{ text: 'Neo SOC', href: '#' }}
             />
@@ -857,47 +934,78 @@ export default function App() {
                 <Header
                   variant="h1"
                   actions={
-                    <Button
-                      iconName="refresh"
-                      onClick={refreshAll}
-                      loading={investigationsQuery.isFetching || detailQuery.isFetching || timelineQuery.isFetching}
-                    >
-                      Refresh all
-                    </Button>
+                    currentView === 'investigations' && (
+                      <RequirePermission permission={PERMISSIONS.VIEW_INVESTIGATIONS}>
+                        <Button
+                          iconName="refresh"
+                          onClick={refreshAll}
+                          loading={investigationsQuery.isFetching || detailQuery.isFetching || timelineQuery.isFetching}
+                        >
+                          Refresh all
+                        </Button>
+                      </RequirePermission>
+                    )
                   }
                 >
-                  SOC command overview
+                  {currentView === 'investigations' && 'SOC Command Overview'}
+                  {currentView === 'admin-users' && 'User Management'}
+                  {currentView === 'demo' && 'Demo Controls'}
+                  {currentView === 'auth-test' && 'Authentication Test'}
+                  {currentView === 'settings' && 'Settings'}
                 </Header>
               }
             >
               <SpaceBetween size="l">
-                <InvestigationMetrics
-                  items={investigations}
-                  isFallback={isInvestigationsFallback}
-                />
-                <InvestigationsTable
-                  items={investigations}
-                  loading={investigationsQuery.isFetching}
-                  error={investigationsQuery.error ?? null}
-                  selectedId={selectedId}
-                  onSelect={setSelectedId}
-                  onRefresh={() => investigationsQuery.refetch()}
-                  isFallback={isInvestigationsFallback}
-                />
-                <InvestigationDetailPanel
-                  investigationId={selectedId}
-                  detail={detailData}
-                  isLoading={detailQuery.isFetching}
-                  error={detailQuery.error ?? null}
-                  timeline={timelineData}
-                  timelineLoading={timelineQuery.isFetching}
-                  timelineError={timelineQuery.error ?? null}
-                  onRefresh={() => {
-                    detailQuery.refetch();
-                    timelineQuery.refetch();
-                  }}
-                  isFallback={isDetailFallback}
-                />
+                {currentView === 'investigations' && (
+                  <RequirePermission permission={PERMISSIONS.VIEW_INVESTIGATIONS} showFallback>
+                    <InvestigationMetrics
+                      items={investigations}
+                      isFallback={isInvestigationsFallback}
+                    />
+                    <InvestigationsTable
+                      items={investigations}
+                      loading={investigationsQuery.isFetching}
+                      error={investigationsQuery.error ?? null}
+                      selectedId={selectedId}
+                      onSelect={setSelectedId}
+                      onRefresh={() => investigationsQuery.refetch()}
+                      isFallback={isInvestigationsFallback}
+                    />
+                    <InvestigationDetailPanel
+                      investigationId={selectedId}
+                      detail={detailData}
+                      isLoading={detailQuery.isFetching}
+                      error={detailQuery.error ?? null}
+                      timeline={timelineData}
+                      timelineLoading={timelineQuery.isFetching}
+                      timelineError={timelineQuery.error ?? null}
+                      onRefresh={() => {
+                        detailQuery.refetch();
+                        timelineQuery.refetch();
+                      }}
+                      isFallback={isDetailFallback}
+                    />
+                  </RequirePermission>
+                )}
+
+                {currentView === 'admin-users' && <AdminUserManagement />}
+
+                {currentView === 'demo' && (
+                  <RequirePermission permission={PERMISSIONS.START_DEMO} showFallback>
+                    <Container header={<Header variant="h2">Demo Controls</Header>}>
+                      <Box>Demo controls will be implemented in a future task.</Box>
+                    </Container>
+                  </RequirePermission>
+                )}
+
+                {currentView === 'auth-test' && <AuthTest />}
+
+                {currentView === 'settings' && (
+                  <SpaceBetween size="l">
+                    <AuthConfig />
+                    <AuthTest />
+                  </SpaceBetween>
+                )}
               </SpaceBetween>
             </ContentLayout>
           }

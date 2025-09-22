@@ -6,7 +6,7 @@ const helmet = require('helmet');
 const { randomUUID } = require('crypto');
 const pino = require('pino');
 const { PutEventsCommand } = require('@aws-sdk/client-eventbridge');
-const { StartExecutionCommand, DescribeExecutionCommand } = require('@aws-sdk/client-step-functions');
+const { StartExecutionCommand, DescribeExecutionCommand } = require('@aws-sdk/client-sfn');
 const { eventBridge, stepFunctions, region } = require('./aws/clients');
 const {
   upsertInvestigation,
@@ -15,6 +15,23 @@ const {
   listInvestigations,
   getBaselineMetrics,
 } = require('./database');
+const {
+  authenticateToken,
+  requirePermission,
+  requireRole,
+  optionalAuth,
+  USER_ROLES,
+  PERMISSIONS
+} = require('./middleware/auth');
+
+// Import Clerk client for user management
+let clerkClient;
+try {
+  const clerk = require('@clerk/clerk-sdk-node');
+  clerkClient = clerk.clerkClient;
+} catch (error) {
+  console.warn('Clerk SDK not available for user management endpoints');
+}
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 const app = express();
@@ -37,7 +54,21 @@ app.get('/healthz', (_req, res) => {
   res.json({ status: 'ok', region, timestamp: new Date().toISOString() });
 });
 
-app.get('/investigations', async (req, res) => {
+// User profile endpoint
+app.get('/auth/profile', authenticateToken, (req, res) => {
+  res.json({
+    user: {
+      id: req.user.id,
+      email: req.user.email,
+      role: req.user.role,
+      permissions: req.user.permissions,
+      isDemo: req.user.isDemo
+    }
+  });
+});
+
+// Protected investigations endpoints
+app.get('/investigations', authenticateToken, requirePermission(PERMISSIONS.VIEW_INVESTIGATIONS), async (req, res) => {
   const tenantId = req.query.tenant || 'default';
   try {
     const items = await listInvestigations(tenantId, 50);
@@ -48,7 +79,7 @@ app.get('/investigations', async (req, res) => {
   }
 });
 
-app.get('/investigations/:id', async (req, res) => {
+app.get('/investigations/:id', authenticateToken, requirePermission(PERMISSIONS.VIEW_INVESTIGATIONS), async (req, res) => {
   const tenantId = req.query.tenant || 'default';
   try {
     const item = await getInvestigation(tenantId, req.params.id);
@@ -62,7 +93,7 @@ app.get('/investigations/:id', async (req, res) => {
   }
 });
 
-app.post('/investigations', async (req, res) => {
+app.post('/investigations', authenticateToken, requirePermission(PERMISSIONS.CREATE_INVESTIGATIONS), async (req, res) => {
   ensureConfigured();
   const tenantId = req.body.tenantId || 'default';
   const alert = req.body.alert;
@@ -107,7 +138,7 @@ app.post('/investigations', async (req, res) => {
   }
 });
 
-app.post('/investigations/:id/step', async (req, res) => {
+app.post('/investigations/:id/step', authenticateToken, requirePermission(PERMISSIONS.MODIFY_INVESTIGATIONS), async (req, res) => {
   ensureConfigured();
   const investigationId = req.params.id;
   const tenantId = req.body.tenantId || 'default';
@@ -142,7 +173,7 @@ app.post('/investigations/:id/step', async (req, res) => {
   }
 });
 
-app.get('/executions/:arn', async (req, res) => {
+app.get('/executions/:arn', authenticateToken, requirePermission(PERMISSIONS.VIEW_INVESTIGATIONS), async (req, res) => {
   ensureConfigured();
   try {
     const command = new DescribeExecutionCommand({ executionArn: req.params.arn });
@@ -154,13 +185,129 @@ app.get('/executions/:arn', async (req, res) => {
   }
 });
 
-app.get('/metrics/baseline', async (req, res) => {
+app.get('/metrics/baseline', authenticateToken, requirePermission(PERMISSIONS.VIEW_DEMO_METRICS), async (req, res) => {
   try {
     const baseline = await getBaselineMetrics(req.query.snapshotDate);
     res.json({ baseline });
   } catch (err) {
     logger.error({ err }, 'failed to load baseline metrics');
     res.status(500).json({ message: 'Failed to load metrics' });
+  }
+});
+
+// Admin user management endpoints
+app.get('/admin/users', authenticateToken, requirePermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
+  try {
+    if (!clerkClient) {
+      // Return mock users for demo
+      const mockUsers = [
+        {
+          id: 'demo-user',
+          email: 'demo@neoharbour.com',
+          firstName: 'Demo',
+          lastName: 'User',
+          role: USER_ROLES.DEMO_USER,
+          createdAt: new Date().toISOString(),
+          lastSignInAt: new Date().toISOString(),
+          banned: false
+        },
+        {
+          id: 'admin-user',
+          email: 'admin@neoharbour.com',
+          firstName: 'Admin',
+          lastName: 'User',
+          role: USER_ROLES.ADMIN,
+          createdAt: new Date().toISOString(),
+          lastSignInAt: new Date().toISOString(),
+          banned: false
+        }
+      ];
+      
+      return res.json({ 
+        users: mockUsers,
+        totalCount: mockUsers.length 
+      });
+    }
+
+    const users = await clerkClient.users.getUserList({
+      limit: req.query.limit || 50,
+      offset: req.query.offset || 0
+    });
+    
+    const formattedUsers = users.data.map(user => ({
+      id: user.id,
+      email: user.emailAddresses[0]?.emailAddress,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.publicMetadata?.role || USER_ROLES.VIEWER,
+      createdAt: user.createdAt,
+      lastSignInAt: user.lastSignInAt,
+      banned: user.banned
+    }));
+    
+    res.json({ 
+      users: formattedUsers,
+      totalCount: users.totalCount 
+    });
+  } catch (err) {
+    logger.error({ err }, 'failed to list users');
+    res.status(500).json({ message: 'Failed to list users' });
+  }
+});
+
+app.patch('/admin/users/:userId/role', authenticateToken, requirePermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
+  try {
+    const { role } = req.body;
+    
+    if (!Object.values(USER_ROLES).includes(role)) {
+      return res.status(400).json({ message: 'Invalid role' });
+    }
+
+    if (!clerkClient) {
+      // Mock success for demo
+      return res.json({ success: true, role });
+    }
+    
+    await clerkClient.users.updateUserMetadata(req.params.userId, {
+      publicMetadata: { role }
+    });
+    
+    res.json({ success: true, role });
+  } catch (err) {
+    logger.error({ err, userId: req.params.userId }, 'failed to update user role');
+    res.status(500).json({ message: 'Failed to update user role' });
+  }
+});
+
+app.patch('/admin/users/:userId/ban', authenticateToken, requirePermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
+  try {
+    if (!clerkClient) {
+      // Mock success for demo
+      return res.json({ success: true, banned: true });
+    }
+    
+    await clerkClient.users.banUser(req.params.userId);
+    
+    res.json({ success: true, banned: true });
+  } catch (err) {
+    logger.error({ err, userId: req.params.userId }, 'failed to ban user');
+    res.status(500).json({ message: 'Failed to ban user' });
+  }
+});
+
+app.patch('/admin/users/:userId/unban', authenticateToken, requirePermission(PERMISSIONS.MANAGE_USERS), async (req, res) => {
+  try {
+    if (!clerkClient) {
+      // Mock success for demo
+      return res.json({ success: true, banned: false });
+    }
+    
+    await clerkClient.users.unbanUser(req.params.userId);
+    
+    res.json({ success: true, banned: false });
+  } catch (err) {
+    logger.error({ err, userId: req.params.userId }, 'failed to unban user');
+    res.status(500).json({ message: 'Failed to unban user' });
   }
 });
 

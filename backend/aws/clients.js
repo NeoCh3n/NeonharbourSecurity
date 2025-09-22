@@ -1,5 +1,5 @@
 const { EventBridgeClient } = require('@aws-sdk/client-eventbridge');
-const { SFNClient } = require('@aws-sdk/client-step-functions');
+const { SFNClient } = require('@aws-sdk/client-sfn');
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient } = require('@aws-sdk/lib-dynamodb');
 const { S3Client } = require('@aws-sdk/client-s3');

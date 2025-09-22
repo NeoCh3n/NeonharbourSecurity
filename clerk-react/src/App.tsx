@@ -719,23 +719,21 @@ export default function App() {
   const [navigationOpen, setNavigationOpen] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const investigationsQuery = useQuery<InvestigationSummary[], Error>(
-    ['investigations'],
-    fetchInvestigations,
-    {
-      staleTime: 30_000,
-      refetchInterval: 60_000,
-      retry: 1,
-    },
-  );
+  const investigationsQuery = useQuery<InvestigationSummary[], Error>({
+    queryKey: ['investigations'],
+    queryFn: fetchInvestigations,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: 1,
+  });
 
-  const investigations = investigationsQuery.isError
+  const investigations: InvestigationSummary[] = investigationsQuery.isError
     ? FALLBACK_INVESTIGATIONS
     : investigationsQuery.data ?? [];
   const isInvestigationsFallback = investigationsQuery.isError;
 
   useEffect(() => {
-    if (!investigations.length) {
+    if (investigations.length === 0) {
       setSelectedId(null);
       return;
     }
@@ -749,31 +747,27 @@ export default function App() {
     }
   }, [investigations, selectedId]);
 
-  const detailQuery = useQuery<InvestigationDetail, Error>(
-    ['investigation', selectedId],
-    () => fetchInvestigationDetail(selectedId!),
-    {
-      enabled: Boolean(selectedId),
-      staleTime: 30_000,
-      retry: 1,
-    },
-  );
+  const detailQuery = useQuery<InvestigationDetail, Error>({
+    queryKey: ['investigation', selectedId],
+    queryFn: () => fetchInvestigationDetail(selectedId!),
+    enabled: Boolean(selectedId),
+    staleTime: 30_000,
+    retry: 1,
+  });
 
-  const timelineQuery = useQuery<TimelineEvent[], Error>(
-    ['investigation', 'timeline', selectedId],
-    () => fetchInvestigationTimeline(selectedId!),
-    {
-      enabled: Boolean(selectedId),
-      staleTime: 30_000,
-      retry: 1,
-    },
-  );
+  const timelineQuery = useQuery<TimelineEvent[], Error>({
+    queryKey: ['investigation', 'timeline', selectedId],
+    queryFn: () => fetchInvestigationTimeline(selectedId!),
+    enabled: Boolean(selectedId),
+    staleTime: 30_000,
+    retry: 1,
+  });
 
-  const detailData = selectedId
+  const detailData: InvestigationDetail | undefined = selectedId
     ? detailQuery.data ?? FALLBACK_DETAILS[selectedId]
     : undefined;
   const isDetailFallback = detailQuery.isError || (!detailQuery.data && !!detailData);
-  const timelineData = timelineQuery.data ?? [];
+  const timelineData: TimelineEvent[] = timelineQuery.data ?? [];
 
   const refreshAll = () => {
     investigationsQuery.refetch();

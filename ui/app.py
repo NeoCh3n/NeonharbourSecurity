@@ -431,6 +431,81 @@ def simulation_history_key(investigation_id: str) -> str:
     return f"pipeline_history_{investigation_id}"
 
 
+def payload_override_tracker_key(investigation_id: str) -> str:
+    return f"pipeline_payload_keys_{investigation_id}"
+
+
+def pipeline_payload_key(investigation_id: str, stage: str) -> str:
+    return f"pipeline_payload_{investigation_id}_{stage}"
+
+
+def pipeline_event_key(investigation_id: str) -> str:
+    return f"pipeline_events_{investigation_id}"
+
+
+def fetch_stage_from_orchestrator(
+    investigation_id: str,
+    stage: str,
+    tenant_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    query = f"?tenant={tenant_id}" if tenant_id else ""
+    response = fetch_json(f"/investigations/{investigation_id}/stages/{stage}{query}")
+    if isinstance(response, dict) and response.get("payload") is not None:
+        return response
+    return None
+
+
+def collect_stage_outputs(
+    investigation_id: str,
+    detail: Dict[str, Any],
+    timeline_rows: List[Dict[str, Any]],
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    fallback_outputs = generate_stage_fallback_outputs(detail, timeline_rows)
+    stage_payloads: Dict[str, Dict[str, Any]] = {}
+    stage_meta: Dict[str, Dict[str, Any]] = {}
+    tenant_id = detail.get("tenantId")
+    for step in PIPELINE_STEPS:
+        stage = step["stage"]
+        live = fetch_stage_from_orchestrator(investigation_id, stage, tenant_id)
+        payload: Dict[str, Any]
+        meta: Dict[str, Any] = {}
+        if live:
+            raw_payload = live.get("payload")
+            payload = raw_payload if isinstance(raw_payload, dict) else fallback_outputs.get(stage, {})
+            meta = {
+                "status": live.get("status"),
+                "completedAt": live.get("completedAt"),
+                "durationSeconds": live.get("durationSeconds"),
+            }
+        else:
+            payload = fallback_outputs.get(stage, {})
+            entry = next((row for row in timeline_rows if row.get("stage") == stage), None)
+            if entry:
+                meta = {
+                    "status": entry.get("status"),
+                    "completedAt": entry.get("completedAt") or entry.get("timestamp"),
+                    "durationSeconds": entry.get("durationSeconds"),
+                }
+        stage_payloads[stage] = payload or {}
+        if meta:
+            stage_meta[stage] = meta
+    return stage_payloads, stage_meta
+
+
+def set_stage_payload_override(
+    investigation_id: str,
+    stage: str,
+    payload: Dict[str, Any],
+) -> None:
+    key = pipeline_payload_key(investigation_id, stage)
+    st.session_state[key] = deepcopy(payload)
+    tracker_key = payload_override_tracker_key(investigation_id)
+    keys = list(st.session_state.get(tracker_key, []))
+    if key not in keys:
+        keys.append(key)
+    st.session_state[tracker_key] = keys
+
+
 def resolve_stage_states(
     investigation_id: str,
     base_states: List[Dict[str, Any]],
@@ -440,6 +515,182 @@ def resolve_stage_states(
     if isinstance(override, list) and override:
         return override
     return base_states
+
+
+def generate_stage_fallback_outputs(
+    detail: Dict[str, Any],
+    timeline_rows: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    summary = detail.get("summary", {})
+    context = detail.get("context", {})
+    actions = summary.get("recommended_actions") or []
+    knowledge_context = summary.get("knowledge_context") or []
+    first_action = (actions[0] or {}).get("action_id") if actions else None
+
+    received = parse_iso_timestamp(detail.get("receivedAt"))
+    updated = parse_iso_timestamp(detail.get("updatedAt"))
+    total_minutes: float | None = None
+    if received and updated:
+        total_minutes = max(round((updated - received).total_seconds() / 60.0, 2), 0.0)
+
+    connectors = []
+    for source, value in context.items():
+        if isinstance(value, list):
+            count = len(value)
+        elif isinstance(value, dict):
+            count = len(value.keys())
+        else:
+            count = 1
+        connectors.append(
+            {
+                "source": source.replace("_", " ").title(),
+                "records": count,
+                "status": "complete" if count else "empty",
+            }
+        )
+
+    plan_payload = {
+        "tenantId": detail.get("tenantId"),
+        "alert": {
+            "displayName": summary.get("summary") or "Investigation",
+            "risk_level": summary.get("risk_level", detail.get("riskLevel")),
+            "receivedAt": detail.get("receivedAt"),
+        },
+        "receivedAt": detail.get("receivedAt"),
+        "ingested_sources": [entry.get("stage") or entry.get("step") for entry in (timeline_rows or [])][:4],
+    }
+
+    execute_payload = {
+        "connectors": connectors,
+        "enrichments": [c["source"] for c in connectors if c.get("records")],
+        "context_insight": f"{len(connectors)} connectors harmonized",
+    }
+
+    analyze_payload = {
+        "summary": summary.get("summary"),
+        "risk_level": summary.get("risk_level"),
+        "confidence": summary.get("confidence"),
+        "recommended_actions": actions,
+        "knowledge_context": knowledge_context,
+    }
+
+    respond_payload = {
+        "metrics": {
+            "MTTA": f"{max(total_minutes or 6.0, 1.0):.1f} min" if total_minutes is not None else "6.0 min",
+            "MTTI": "12.5 min",
+            "MTTR": "34.0 min",
+            "FPR": "3.0%",
+        },
+        "decision": f"Risk classified as {(summary.get('risk_level') or detail.get('riskLevel') or 'unknown').title()}",
+        "action": first_action or "MONITOR",
+        "actions_recommended": len(actions),
+    }
+
+    adapt_payload = {
+        "feedback": {
+            "actions_recommended": len(actions),
+            "knowledge_refs": len(knowledge_context),
+            "notes": "Auto-logged for tenant tuning",
+        },
+        "next_best_action": "Tune Okta conditional access" if actions else "Capture analyst feedback",
+    }
+
+    report_payload = {
+        "artifact": f"audit/{detail.get('investigationId', 'investigation')}.jsonl",
+        "status": "immutable-log-written",
+        "distribution": ["S3::approvals", "DynamoDB::metrics"],
+    }
+
+    return {
+        "plan": plan_payload,
+        "execute": execute_payload,
+        "analyze": analyze_payload,
+        "respond": respond_payload,
+        "adapt": adapt_payload,
+        "report": report_payload,
+    }
+
+
+def describe_stage_event(stage: str, payload: Dict[str, Any]) -> str:
+    if stage == "plan":
+        alert = payload.get("alert", {}) if isinstance(payload, dict) else {}
+        return (
+            f"Planner normalized alert '{alert.get('displayName', 'investigation')}' for tenant"
+            f" {payload.get('tenantId', 'unknown')}"
+        )
+    if stage == "execute":
+        connectors = payload.get("connectors", []) if isinstance(payload, dict) else []
+        sources = ", ".join(c.get("source", "Connector") for c in connectors[:3])
+        return f"Context Executor pulled telemetry from {sources or 'connectors'}"
+    if stage == "analyze":
+        action = ""
+        recs = payload.get("recommended_actions") if isinstance(payload, dict) else None
+        if isinstance(recs, list) and recs:
+            primary = recs[0]
+            if isinstance(primary, dict):
+                action = f" · rec {primary.get('action_id', primary.get('id', 'ACTION'))}"
+        return f"Analyst mapped HKMA controls · risk {payload.get('risk_level', 'n/a')}{action}"
+    if stage == "respond":
+        return f"Risk Orchestrator staged action {payload.get('action', 'MONITOR')}"
+    if stage == "adapt":
+        return "Learning Curator recorded precision feedback"
+    if stage == "report":
+        return "Audit Scribe sealed immutable log and metrics"
+    return f"{stage.title()} stage completed"
+
+
+def derive_dynamic_actions(stage: str, payload: Dict[str, Any]) -> List[str]:
+    if not isinstance(payload, dict):
+        return []
+    actions: List[str] = []
+    if stage == "analyze":
+        recs = payload.get("recommended_actions") or []
+        for action in recs[:3]:
+            if not isinstance(action, dict):
+                continue
+            action_id = action.get("action_id", action.get("id", "ACTION"))
+            description = action.get("description") or action.get("rationale") or "Suggested follow-up"
+            actions.append(f"{action_id}: {description}")
+    elif stage == "respond":
+        primary = payload.get("action") or payload.get("decision")
+        if primary:
+            actions.append(f"Primary action: {primary}")
+        metrics = payload.get("metrics")
+        if isinstance(metrics, dict):
+            for name in ("MTTA", "MTTI", "MTTR", "FPR"):
+                if metrics.get(name):
+                    actions.append(f"{name}: {metrics[name]}")
+        if payload.get("actions_recommended"):
+            actions.append(f"Actions queued: {payload['actions_recommended']}")
+    elif stage == "execute":
+        connectors = payload.get("connectors") or []
+        for connector in connectors[:3]:
+            if isinstance(connector, dict):
+                source = connector.get("source", "Connector")
+                records = connector.get("records")
+                actions.append(f"{source}: {records} records")
+    elif stage == "adapt":
+        feedback = payload.get("feedback") or {}
+        if isinstance(feedback, dict):
+            actions.append(f"Feedback logged: {feedback.get('notes', 'Analyst responses captured')}" )
+        if payload.get("next_best_action"):
+            actions.append(f"Next best action: {payload['next_best_action']}")
+    elif stage == "plan":
+        alert = payload.get("alert", {})
+        if isinstance(alert, dict):
+            name = alert.get("displayName") or alert.get("title")
+            if name:
+                actions.append(f"Alert: {name}")
+        if payload.get("tenantId"):
+            actions.append(f"Tenant: {payload['tenantId']}")
+    elif stage == "report":
+        if payload.get("artifact"):
+            actions.append(f"Artifact: {payload['artifact']}")
+        if payload.get("distribution"):
+            targets = payload.get("distribution")
+            if isinstance(targets, list):
+                actions.append("Distribution → " + ", ".join(targets[:3]))
+    return actions[:4]
 
 
 def render_agent_status_board(
@@ -476,6 +727,17 @@ def render_agent_status_panel(
     mode: str,
 ) -> None:
     base_states = compute_agent_stage_states(investigation_id, detail, timeline_rows)
+    stage_outputs, stage_meta = collect_stage_outputs(investigation_id, detail, timeline_rows)
+    if not st.session_state.get(simulation_state_key(investigation_id)):
+        for state in base_states:
+            stage = state["stage"]
+            payload = stage_outputs.get(stage)
+            if payload:
+                state["description"] = describe_payload(stage, payload)
+                dynamic_actions = derive_dynamic_actions(stage, payload)
+                if dynamic_actions:
+                    state["actions"] = dynamic_actions
+                set_stage_payload_override(investigation_id, stage, payload)
     with st.container():
         info_col, slider_col, button_col = st.columns([3, 2, 2])
         with info_col:
@@ -519,7 +781,16 @@ def render_agent_status_panel(
                 st.warning("Switch to Demo Mode to play the agentic pipeline animation.")
                 render_agent_status_board(base_states, board_placeholder)
             else:
-                run_pipeline_simulation(investigation_id, base_states, board_placeholder, speed)
+                run_pipeline_simulation(
+                    investigation_id,
+                    detail,
+                    timeline_rows,
+                    base_states,
+                    board_placeholder,
+                    speed,
+                    cached_outputs=stage_outputs,
+                    cached_meta=stage_meta,
+                )
                 final_states = resolve_stage_states(investigation_id, base_states)
                 render_agent_status_board(final_states, board_placeholder)
 
@@ -532,6 +803,11 @@ def render_agent_status_panel(
 def clear_pipeline_simulation(investigation_id: str) -> None:
     st.session_state.pop(simulation_state_key(investigation_id), None)
     st.session_state.pop(simulation_history_key(investigation_id), None)
+    tracker_key = payload_override_tracker_key(investigation_id)
+    keys = st.session_state.pop(tracker_key, []) or []
+    for key in keys:
+        st.session_state.pop(key, None)
+    st.session_state.pop(pipeline_event_key(investigation_id), None)
 
 
 def render_pipeline_history(investigation_id: str) -> None:
@@ -558,12 +834,23 @@ def render_pipeline_history(investigation_id: str) -> None:
 
 def run_pipeline_simulation(
     investigation_id: str,
+    detail: Dict[str, Any],
+    timeline_rows: List[Dict[str, Any]],
     base_states: List[Dict[str, Any]],
     placeholder: Any,
     speed: float,
+    cached_outputs: Optional[Dict[str, Dict[str, Any]]] = None,
+    cached_meta: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> None:
     history_key = simulation_history_key(investigation_id)
     st.session_state[history_key] = []
+    st.session_state[pipeline_event_key(investigation_id)] = []
+    st.session_state[payload_override_tracker_key(investigation_id)] = []
+    if cached_outputs is None or cached_meta is None:
+        stage_outputs, stage_meta = collect_stage_outputs(investigation_id, detail, timeline_rows)
+    else:
+        stage_outputs = cached_outputs
+        stage_meta = cached_meta
     speed = max(speed, 0.1)
     for idx, step in enumerate(PIPELINE_STEPS):
         stage_states: List[Dict[str, Any]] = []
@@ -578,6 +865,14 @@ def run_pipeline_simulation(
             else:
                 state["status"] = "queued"
                 state["percent"] = 15
+            stage_name = base["stage"]
+            output_payload = stage_outputs.get(stage_name)
+            if output_payload and stage_idx <= idx:
+                state["payload"] = output_payload
+                state["description"] = describe_payload(base["stage"], output_payload)
+                dynamic_actions = derive_dynamic_actions(stage_name, output_payload)
+                if dynamic_actions:
+                    state["actions"] = dynamic_actions
             stage_states.append(state)
         st.session_state[simulation_state_key(investigation_id)] = stage_states
         render_agent_status_board(stage_states, placeholder)
@@ -594,12 +889,36 @@ def run_pipeline_simulation(
             }
         )
         time.sleep(delay)
+        stage_name = step["stage"]
+        payload_override = stage_outputs.get(stage_name)
+        if payload_override:
+            set_stage_payload_override(investigation_id, stage_name, payload_override)
+        event_record = {
+            "stage": stage_name,
+            "time": completion_time,
+            "payload": describe_stage_event(stage_name, payload_override or {}),
+        }
+        if stage_name in stage_meta:
+            meta = stage_meta[stage_name]
+            if meta.get("completedAt"):
+                event_record["time"] = meta.get("completedAt")
+            if meta.get("durationSeconds"):
+                event_record["durationSeconds"] = meta.get("durationSeconds")
+        st.session_state[pipeline_event_key(investigation_id)].append(event_record)
 
     final_states: List[Dict[str, Any]] = []
     for base in base_states:
         state = deepcopy(base)
         state["status"] = "completed"
         state["percent"] = 100
+        stage_name = base["stage"]
+        output_payload = stage_outputs.get(stage_name)
+        if output_payload:
+            state["payload"] = output_payload
+            state["description"] = describe_payload(base["stage"], output_payload)
+            dynamic_actions = derive_dynamic_actions(stage_name, output_payload)
+            if dynamic_actions:
+                state["actions"] = dynamic_actions
         final_states.append(state)
     st.session_state[simulation_state_key(investigation_id)] = final_states
     render_agent_status_board(final_states, placeholder)
@@ -657,13 +976,31 @@ def render_agent_action_center(investigation_id: str, detail: Dict[str, Any]) ->
 
 
 def render_agent_event_feed(
+    investigation_id: str,
     timeline_rows: List[Dict[str, Any]],
 ) -> None:
     st.subheader("Agent telemetry feed")
-    if not timeline_rows:
+    session_events = st.session_state.get(pipeline_event_key(investigation_id))
+    combined_rows: List[Dict[str, Any]] = []
+    if isinstance(timeline_rows, list):
+        combined_rows.extend(timeline_rows)
+    if isinstance(session_events, list):
+        combined_rows.extend(session_events)
+    if not combined_rows:
         st.info("No live events yet – run the copilot simulator or stream live data to populate telemetry.")
         return
-    for entry in timeline_rows:
+    enumerated_rows = list(enumerate(combined_rows))
+
+    def event_sort_key(item: tuple[int, Dict[str, Any]]) -> tuple[str, int]:
+        index, entry = item
+        timestamp = entry.get("time") or entry.get("startedAt") or entry.get("timestamp")
+        dt = parse_iso_timestamp(timestamp)
+        sortable = dt.isoformat() if dt else str(timestamp or "")
+        return sortable, index
+
+    enumerated_rows.sort(key=event_sort_key)
+
+    for _, entry in enumerated_rows:
         stage = entry.get("stage") or entry.get("label") or "Stage"
         timestamp = format_timestamp(entry.get("time") or entry.get("startedAt"))
         description = entry.get("payload") or entry.get("detail") or entry.get("step") or ""
@@ -716,15 +1053,18 @@ def render_agents_copilot(items: List[Dict[str, Any]], mode: str) -> None:
         st.info("Investigations are missing identifiers – wait for pipeline updates.")
         return
     investigation_id = st.selectbox("Investigation", options=sorted(options.keys()))
+    st.session_state["selected_investigation"] = investigation_id
     detail = fetch_json(f"/investigations/{investigation_id}") or {}
     if not detail:
         seed = load_seed("investigation_detail.json")
         detail = seed.get(investigation_id, {}) if isinstance(seed, dict) else {}
     timeline_rows = fetch_timeline(investigation_id, detail.get("timeline") or [])
+    if not isinstance(timeline_rows, list):
+        timeline_rows = []
 
     render_agent_status_panel(investigation_id, detail, timeline_rows, mode)
     render_agent_action_center(investigation_id, detail)
-    render_agent_event_feed(timeline_rows)
+    render_agent_event_feed(investigation_id, timeline_rows)
 
 
 def render_knowledge_hub() -> None:
@@ -892,6 +1232,9 @@ def build_stage_payload(
     timeline: List[Dict[str, Any]],
     stage: str,
 ) -> Dict[str, Any]:
+    override = st.session_state.get(pipeline_payload_key(investigation_id, stage))
+    if isinstance(override, dict) and override:
+        return override
     entry = timeline_entry_for_stage(timeline, stage)
     timeline_payload = entry.get("payload") if entry else None
     fallback: Dict[str, Any] | None = None

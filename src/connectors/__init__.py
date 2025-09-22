@@ -4,6 +4,9 @@ from .defender import DefenderClient
 from .crowdstrike import CrowdStrikeClient
 from .entra import EntraClient
 from .okta import OktaClient
+from .cloudtrail import CloudTrailClient
+from .vpcflow import VPCFlowLogsClient
+from .guardduty import GuardDutyClient
 
 __all__ = [
     'SentinelClient',
@@ -12,4 +15,7 @@ __all__ = [
     'CrowdStrikeClient',
     'EntraClient',
     'OktaClient',
+    'CloudTrailClient',
+    'VPCFlowLogsClient',
+    'GuardDutyClient',
 ]

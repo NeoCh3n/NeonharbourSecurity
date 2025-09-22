@@ -1,0 +1,366 @@
+{
+  "Findings": [
+    {
+      "Id": "12345678901234567890123456789012",
+      "Arn": "arn:aws:guardduty:us-east-1:123456789012:detector/12345678901234567890123456789012/finding/12345678901234567890123456789012",
+      "Type": "Recon:EC2/PortProbeUnprotectedPort",
+      "Region": "us-east-1",
+      "Partition": "aws",
+      "AccountId": "123456789012",
+      "CreatedAt": "2025-01-15T10:30:00.000Z",
+      "UpdatedAt": "2025-01-15T10:35:00.000Z",
+      "Severity": 2.0,
+      "Confidence": 7.5,
+      "Title": "Unprotected port on EC2 instance is being probed.",
+      "Description": "EC2 instance has an unprotected port which is being probed by a known malicious host.",
+      "Service": {
+        "Action": {
+          "ActionType": "NETWORK_CONNECTION",
+          "NetworkConnectionAction": {
+            "ConnectionDirection": "INBOUND",
+            "RemoteIpDetails": {
+              "IpAddressV4": "198.51.100.42",
+              "Country": {
+                "CountryName": "Example Country"
+              }
+            },
+            "RemotePortDetails": {
+              "Port": 12345,
+              "PortName": "Unknown"
+            },
+            "LocalPortDetails": {
+              "Port": 22,
+              "PortName": "SSH"
+            },
+            "Protocol": "TCP",
+            "Blocked": false
+          }
+        },
+        "Archived": false,
+        "Count": 5,
+        "DetectorId": "12345678901234567890123456789012",
+        "EventFirstSeen": "2025-01-15T10:30:00.000Z",
+        "EventLastSeen": "2025-01-15T10:35:00.000Z",
+        "ResourceRole": "TARGET",
+        "ServiceName": "guardduty"
+      },
+      "Resource": {
+        "InstanceDetails": {
+          "InstanceId": "i-1234567890abcdef0",
+          "InstanceType": "t3.micro",
+          "LaunchTime": "2025-01-10T08:00:00.000Z",
+          "Platform": "linux",
+          "NetworkInterfaces": [
+            {
+              "NetworkInterfaceId": "eni-1234567890abcdef0",
+              "PrivateDnsName": "ip-10-0-1-100.ec2.internal",
+              "PrivateIpAddress": "10.0.1.100",
+              "PublicDnsName": "ec2-203-0-113-12.compute-1.amazonaws.com",
+              "PublicIp": "203.0.113.12",
+              "SecurityGroups": [
+                {
+                  "GroupId": "sg-12345678",
+                  "GroupName": "default"
+                }
+              ],
+              "SubnetId": "subnet-12345678",
+              "VpcId": "vpc-12345678"
+            }
+          ]
+        },
+        "ResourceType": "Instance"
+      },
+      "SchemaVersion": "2.0"
+    },
+    {
+      "Id": "87654321098765432109876543210987",
+      "Arn": "arn:aws:guardduty:us-east-1:123456789012:detector/12345678901234567890123456789012/finding/87654321098765432109876543210987",
+      "Type": "Malware:EC2/SuspiciousFile",
+      "Region": "us-east-1",
+      "Partition": "aws",
+      "AccountId": "123456789012",
+      "CreatedAt": "2025-01-15T11:00:00.000Z",
+      "UpdatedAt": "2025-01-15T11:05:00.000Z",
+      "Severity": 8.5,
+      "Confidence": 9.0,
+      "Title": "Suspicious file detected on EC2 instance.",
+      "Description": "A suspicious file was detected on the EC2 instance that may indicate malware infection.",
+      "Service": {
+        "Action": {
+          "ActionType": "FILE",
+          "FileAction": {
+            "FilePath": "/tmp/suspicious_binary",
+            "FileName": "suspicious_binary",
+            "FileHash": "d41d8cd98f00b204e9800998ecf8427e"
+          }
+        },
+        "Evidence": {
+          "ThreatIntelligenceDetails": [
+            {
+              "ThreatListName": "ProofPoint",
+              "ThreatNames": ["Trojan.Generic"]
+            }
+          ]
+        },
+        "Archived": false,
+        "Count": 1,
+        "DetectorId": "12345678901234567890123456789012",
+        "EventFirstSeen": "2025-01-15T11:00:00.000Z",
+        "EventLastSeen": "2025-01-15T11:00:00.000Z",
+        "ResourceRole": "TARGET",
+        "ServiceName": "guardduty"
+      },
+      "Resource": {
+        "InstanceDetails": {
+          "InstanceId": "i-0987654321fedcba0",
+          "InstanceType": "t3.small",
+          "LaunchTime": "2025-01-12T14:30:00.000Z",
+          "Platform": "linux",
+          "NetworkInterfaces": [
+            {
+              "NetworkInterfaceId": "eni-0987654321fedcba0",
+              "PrivateDnsName": "ip-10-0-2-50.ec2.internal",
+              "PrivateIpAddress": "10.0.2.50",
+              "PublicDnsName": "ec2-198-51-100-42.compute-1.amazonaws.com",
+              "PublicIp": "198.51.100.42",
+              "SecurityGroups": [
+                {
+                  "GroupId": "sg-87654321",
+                  "GroupName": "web-servers"
+                }
+              ],
+              "SubnetId": "subnet-87654321",
+              "VpcId": "vpc-87654321"
+            }
+          ]
+        },
+        "ResourceType": "Instance"
+      },
+      "SchemaVersion": "2.0"
+    },
+    {
+      "Id": "11111111222222223333333344444444",
+      "Arn": "arn:aws:guardduty:us-east-1:123456789012:detector/12345678901234567890123456789012/finding/11111111222222223333333344444444",
+      "Type": "CryptoCurrency:EC2/BitcoinTool.B!DNS",
+      "Region": "us-east-1",
+      "Partition": "aws",
+      "AccountId": "123456789012",
+      "CreatedAt": "2025-01-15T09:45:00.000Z",
+      "UpdatedAt": "2025-01-15T09:50:00.000Z",
+      "Severity": 3.0,
+      "Confidence": 5.0,
+      "Title": "EC2 instance is communicating with a cryptocurrency mining pool.",
+      "Description": "EC2 instance is making DNS requests associated with cryptocurrency mining activity.",
+      "Service": {
+        "Action": {
+          "ActionType": "DNS_REQUEST",
+          "DnsRequestAction": {
+            "Domain": "mining-pool.example.com",
+            "Protocol": "UDP",
+            "Blocked": false
+          }
+        },
+        "Archived": false,
+        "Count": 15,
+        "DetectorId": "12345678901234567890123456789012",
+        "EventFirstSeen": "2025-01-15T09:45:00.000Z",
+        "EventLastSeen": "2025-01-15T09:50:00.000Z",
+        "ResourceRole": "ACTOR",
+        "ServiceName": "guardduty"
+      },
+      "Resource": {
+        "InstanceDetails": {
+          "InstanceId": "i-abcdef1234567890",
+          "InstanceType": "c5.large",
+          "LaunchTime": "2025-01-14T16:20:00.000Z",
+          "Platform": "linux",
+          "NetworkInterfaces": [
+            {
+              "NetworkInterfaceId": "eni-abcdef1234567890",
+              "PrivateDnsName": "ip-10-0-3-75.ec2.internal",
+              "PrivateIpAddress": "10.0.3.75",
+              "PublicDnsName": "ec2-52-86-200-106.compute-1.amazonaws.com",
+              "PublicIp": "52.86.200.106",
+              "SecurityGroups": [
+                {
+                  "GroupId": "sg-abcdef12",
+                  "GroupName": "compute-nodes"
+                }
+              ],
+              "SubnetId": "subnet-abcdef12",
+              "VpcId": "vpc-abcdef12"
+            }
+          ]
+        },
+        "ResourceType": "Instance"
+      },
+      "SchemaVersion": "2.0"
+    },
+    {
+      "Id": "44444444555555556666666677777777",
+      "Arn": "arn:aws:guardduty:us-east-1:123456789012:detector/12345678901234567890123456789012/finding/44444444555555556666666677777777",
+      "Type": "Policy:IAMUser/RootCredentialUsage",
+      "Region": "us-east-1",
+      "Partition": "aws",
+      "AccountId": "123456789012",
+      "CreatedAt": "2025-01-15T12:00:00.000Z",
+      "UpdatedAt": "2025-01-15T12:05:00.000Z",
+      "Severity": 1.5,
+      "Confidence": 4.0,
+      "Title": "Root credentials are being used.",
+      "Description": "Root user credentials were used to perform an action in your AWS account.",
+      "Service": {
+        "Action": {
+          "ActionType": "AWS_API_CALL",
+          "AwsApiCallAction": {
+            "Api": "DescribeInstances",
+            "CallerType": "Root",
+            "ServiceName": "ec2.amazonaws.com"
+          }
+        },
+        "Archived": false,
+        "Count": 1,
+        "DetectorId": "12345678901234567890123456789012",
+        "EventFirstSeen": "2025-01-15T12:00:00.000Z",
+        "EventLastSeen": "2025-01-15T12:00:00.000Z",
+        "ResourceRole": "TARGET",
+        "ServiceName": "guardduty"
+      },
+      "Resource": {
+        "AccessKeyDetails": {
+          "AccessKeyId": "AKIAIOSFODNN7EXAMPLE",
+          "PrincipalId": "123456789012",
+          "UserName": "root",
+          "UserType": "Root"
+        },
+        "ResourceType": "AccessKey"
+      },
+      "SchemaVersion": "2.0"
+    },
+    {
+      "Id": "55555555666666667777777788888888",
+      "Arn": "arn:aws:guardduty:us-east-1:123456789012:detector/12345678901234567890123456789012/finding/55555555666666667777777788888888",
+      "Type": "UnauthorizedAPI:EC2/TorIPCaller",
+      "Region": "us-east-1",
+      "Partition": "aws",
+      "AccountId": "123456789012",
+      "CreatedAt": "2025-01-15T13:00:00.000Z",
+      "UpdatedAt": "2025-01-15T13:05:00.000Z",
+      "Severity": 2.0,
+      "Confidence": 3.5,
+      "Title": "API call from Tor exit node IP address.",
+      "Description": "An API call was made from a Tor exit node IP address.",
+      "Service": {
+        "Action": {
+          "ActionType": "AWS_API_CALL",
+          "AwsApiCallAction": {
+            "Api": "DescribeRegions",
+            "CallerType": "IAMUser",
+            "ServiceName": "ec2.amazonaws.com"
+          }
+        },
+        "Archived": false,
+        "Count": 2,
+        "DetectorId": "12345678901234567890123456789012",
+        "EventFirstSeen": "2025-01-15T13:00:00.000Z",
+        "EventLastSeen": "2025-01-15T13:05:00.000Z",
+        "ResourceRole": "TARGET",
+        "ServiceName": "guardduty"
+      },
+      "Resource": {
+        "AccessKeyDetails": {
+          "AccessKeyId": "AKIAI44QH8DHBEXAMPLE",
+          "PrincipalId": "AIDACKCEVSQ6C2EXAMPLE",
+          "UserName": "testuser",
+          "UserType": "IAMUser"
+        },
+        "ResourceType": "AccessKey"
+      },
+      "SchemaVersion": "2.0"
+    },
+    {
+      "Id": "99999999888888887777777766666666",
+      "Arn": "arn:aws:guardduty:us-east-1:123456789012:detector/12345678901234567890123456789012/finding/99999999888888887777777766666666",
+      "Type": "Stealth:S3/ServerAccessLoggingDisabled",
+      "Region": "us-east-1",
+      "Partition": "aws",
+      "AccountId": "123456789012",
+      "CreatedAt": "2025-01-15T14:00:00.000Z",
+      "UpdatedAt": "2025-01-15T14:05:00.000Z",
+      "Severity": 1.0,
+      "Confidence": 8.0,
+      "Title": "S3 server access logging has been disabled.",
+      "Description": "S3 server access logging was disabled for an S3 bucket.",
+      "Service": {
+        "Action": {
+          "ActionType": "AWS_API_CALL",
+          "AwsApiCallAction": {
+            "Api": "PutBucketLogging",
+            "CallerType": "IAMUser",
+            "ServiceName": "s3.amazonaws.com"
+          }
+        },
+        "Archived": false,
+        "Count": 1,
+        "DetectorId": "12345678901234567890123456789012",
+        "EventFirstSeen": "2025-01-15T14:00:00.000Z",
+        "EventLastSeen": "2025-01-15T14:00:00.000Z",
+        "ResourceRole": "TARGET",
+        "ServiceName": "guardduty"
+      },
+      "Resource": {
+        "S3BucketDetails": [
+          {
+            "Arn": "arn:aws:s3:::example-bucket",
+            "Name": "example-bucket",
+            "Type": "Destination",
+            "CreatedAt": "2025-01-10T10:00:00.000Z"
+          }
+        ],
+        "ResourceType": "S3Bucket"
+      },
+      "SchemaVersion": "2.0"
+    },
+    {
+      "Id": "aaaaaaaabbbbbbbbccccccccdddddddd",
+      "Arn": "arn:aws:guardduty:us-east-1:123456789012:detector/12345678901234567890123456789012/finding/aaaaaaaabbbbbbbbccccccccdddddddd",
+      "Type": "Discovery:S3/BucketEnumeration.Unusual",
+      "Region": "us-east-1",
+      "Partition": "aws",
+      "AccountId": "123456789012",
+      "CreatedAt": "2025-01-15T15:00:00.000Z",
+      "UpdatedAt": "2025-01-15T15:05:00.000Z",
+      "Severity": 3.5,
+      "Confidence": 6.0,
+      "Title": "Unusual S3 bucket enumeration behavior detected.",
+      "Description": "An unusual pattern of S3 bucket enumeration was detected.",
+      "Service": {
+        "Action": {
+          "ActionType": "AWS_API_CALL",
+          "AwsApiCallAction": {
+            "Api": "ListBuckets",
+            "CallerType": "IAMUser",
+            "ServiceName": "s3.amazonaws.com"
+          }
+        },
+        "Archived": false,
+        "Count": 25,
+        "DetectorId": "12345678901234567890123456789012",
+        "EventFirstSeen": "2025-01-15T15:00:00.000Z",
+        "EventLastSeen": "2025-01-15T15:05:00.000Z",
+        "ResourceRole": "TARGET",
+        "ServiceName": "guardduty"
+      },
+      "Resource": {
+        "AccessKeyDetails": {
+          "AccessKeyId": "AKIAI44QH8DHBEXAMPLE",
+          "PrincipalId": "AIDACKCEVSQ6C2EXAMPLE",
+          "UserName": "analyst",
+          "UserType": "IAMUser"
+        },
+        "ResourceType": "AccessKey"
+      },
+      "SchemaVersion": "2.0"
+    }
+  ]
+}

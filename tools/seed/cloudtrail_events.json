@@ -1,0 +1,185 @@
+{
+  "Events": [
+    {
+      "EventId": "12345678-1234-1234-1234-123456789012",
+      "EventName": "ConsoleLogin",
+      "EventTime": "2025-01-15T10:30:00Z",
+      "EventSource": "signin.amazonaws.com",
+      "AwsRegion": "us-east-1",
+      "SourceIPAddress": "203.0.113.12",
+      "UserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      "UserIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDACKCEVSQ6C2EXAMPLE",
+        "arn": "arn:aws:iam::123456789012:user/johndoe",
+        "accountId": "123456789012",
+        "userName": "johndoe"
+      },
+      "RequestParameters": null,
+      "ResponseElements": {
+        "ConsoleLogin": "Success"
+      },
+      "ReadOnly": true,
+      "EventType": "AwsConsoleSignIn",
+      "ManagementEvent": true,
+      "RecipientAccountId": "123456789012"
+    },
+    {
+      "EventId": "87654321-4321-4321-4321-210987654321",
+      "EventName": "CreateUser",
+      "EventTime": "2025-01-15T11:15:00Z",
+      "EventSource": "iam.amazonaws.com",
+      "AwsRegion": "us-east-1",
+      "SourceIPAddress": "10.0.1.100",
+      "UserAgent": "aws-cli/2.0.0 Python/3.8.0 Linux/5.4.0-42-generic botocore/2.0.0dev0",
+      "UserIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDACKCEVSQ6C2EXAMPLE",
+        "arn": "arn:aws:iam::123456789012:user/admin",
+        "accountId": "123456789012",
+        "userName": "admin"
+      },
+      "RequestParameters": {
+        "userName": "newuser",
+        "path": "/"
+      },
+      "ResponseElements": {
+        "user": {
+          "path": "/",
+          "userName": "newuser",
+          "userId": "AIDACKCEVSQ6C2NEWUSER",
+          "arn": "arn:aws:iam::123456789012:user/newuser",
+          "createDate": "2025-01-15T11:15:00Z"
+        }
+      },
+      "ReadOnly": false,
+      "EventType": "AwsApiCall",
+      "ManagementEvent": true,
+      "RecipientAccountId": "123456789012"
+    },
+    {
+      "EventId": "11111111-2222-3333-4444-555555555555",
+      "EventName": "ConsoleLogin",
+      "EventTime": "2025-01-15T09:45:00Z",
+      "EventSource": "signin.amazonaws.com",
+      "AwsRegion": "us-east-1",
+      "SourceIPAddress": "198.51.100.42",
+      "UserAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+      "UserIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDACKCEVSQ6C2BADUSER",
+        "arn": "arn:aws:iam::123456789012:user/suspicioususer",
+        "accountId": "123456789012",
+        "userName": "suspicioususer"
+      },
+      "ErrorCode": "SigninFailure",
+      "ErrorMessage": "Failed authentication",
+      "RequestParameters": null,
+      "ResponseElements": {
+        "ConsoleLogin": "Failure"
+      },
+      "ReadOnly": true,
+      "EventType": "AwsConsoleSignIn",
+      "ManagementEvent": true,
+      "RecipientAccountId": "123456789012"
+    },
+    {
+      "EventId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      "EventName": "DescribeInstances",
+      "EventTime": "2025-01-15T12:00:00Z",
+      "EventSource": "ec2.amazonaws.com",
+      "AwsRegion": "us-east-1",
+      "SourceIPAddress": "10.0.1.50",
+      "UserAgent": "aws-cli/2.0.0 Python/3.8.0 Linux/5.4.0-42-generic botocore/2.0.0dev0",
+      "UserIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDACKCEVSQ6C2ANALYST",
+        "arn": "arn:aws:iam::123456789012:user/analyst",
+        "accountId": "123456789012",
+        "userName": "analyst"
+      },
+      "RequestParameters": {},
+      "ResponseElements": null,
+      "ReadOnly": true,
+      "EventType": "AwsApiCall",
+      "ManagementEvent": true,
+      "RecipientAccountId": "123456789012"
+    },
+    {
+      "EventId": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+      "EventName": "ListBuckets",
+      "EventTime": "2025-01-15T13:30:00Z",
+      "EventSource": "s3.amazonaws.com",
+      "AwsRegion": "us-east-1",
+      "SourceIPAddress": "10.0.2.75",
+      "UserAgent": "aws-sdk-python/1.26.0 Python/3.9.0 Linux/5.4.0-42-generic botocore/1.29.0",
+      "UserIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDACKCEVSQ6C2DEVOPS",
+        "arn": "arn:aws:iam::123456789012:user/devops",
+        "accountId": "123456789012",
+        "userName": "devops"
+      },
+      "RequestParameters": {},
+      "ResponseElements": null,
+      "ReadOnly": true,
+      "EventType": "AwsApiCall",
+      "ManagementEvent": true,
+      "RecipientAccountId": "123456789012"
+    },
+    {
+      "EventId": "cccccccc-dddd-eeee-ffff-000000000000",
+      "EventName": "GetSessionToken",
+      "EventTime": "2025-01-15T14:15:00Z",
+      "EventSource": "sts.amazonaws.com",
+      "AwsRegion": "us-east-1",
+      "SourceIPAddress": "172.16.0.25",
+      "UserAgent": "aws-cli/2.0.0 Python/3.8.0 Windows/10 botocore/2.0.0dev0",
+      "UserIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDACKCEVSQ6C2TEMP",
+        "arn": "arn:aws:iam::123456789012:user/tempuser",
+        "accountId": "123456789012",
+        "userName": "tempuser"
+      },
+      "RequestParameters": {
+        "durationSeconds": 3600
+      },
+      "ResponseElements": {
+        "credentials": {
+          "sessionToken": "[REDACTED]",
+          "accessKeyId": "ASIAIOSFODNN7EXAMPLE",
+          "expiration": "2025-01-15T15:15:00Z"
+        }
+      },
+      "ReadOnly": false,
+      "EventType": "AwsApiCall",
+      "ManagementEvent": true,
+      "RecipientAccountId": "123456789012"
+    },
+    {
+      "EventId": "dddddddd-eeee-ffff-0000-111111111111",
+      "EventName": "DeleteUser",
+      "EventTime": "2025-01-15T16:00:00Z",
+      "EventSource": "iam.amazonaws.com",
+      "AwsRegion": "us-east-1",
+      "SourceIPAddress": "203.0.113.200",
+      "UserAgent": "aws-cli/2.0.0 Python/3.8.0 Linux/5.4.0-42-generic botocore/2.0.0dev0",
+      "UserIdentity": {
+        "type": "IAMUser",
+        "principalId": "AIDACKCEVSQ6C2SUSPICIOUS",
+        "arn": "arn:aws:iam::123456789012:user/suspicious-admin",
+        "accountId": "123456789012",
+        "userName": "suspicious-admin"
+      },
+      "RequestParameters": {
+        "userName": "security-analyst"
+      },
+      "ResponseElements": null,
+      "ReadOnly": false,
+      "EventType": "AwsApiCall",
+      "ManagementEvent": true,
+      "RecipientAccountId": "123456789012"
+    }
+  ]
+}

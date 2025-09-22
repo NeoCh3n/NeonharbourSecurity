@@ -5,7 +5,7 @@ const { DynamoDBDocumentClient } = require('@aws-sdk/lib-dynamodb');
 const { S3Client } = require('@aws-sdk/client-s3');
 const { KMSClient } = require('@aws-sdk/client-kms');
 
-const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'ap-southeast-1';
+const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
 
 const baseClientConfig = {
   region,

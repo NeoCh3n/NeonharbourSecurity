@@ -24,6 +24,11 @@ const {
   PERMISSIONS
 } = require('./middleware/auth');
 
+// Import AWS configuration utilities
+const { AWSValidator } = require('./aws/validator');
+const { EnvironmentManager } = require('./aws/environment');
+const { SetupWizard } = require('./aws/setup');
+
 // Import Clerk client for user management
 let clerkClient;
 try {
@@ -308,6 +313,184 @@ app.patch('/admin/users/:userId/unban', authenticateToken, requirePermission(PER
   } catch (err) {
     logger.error({ err, userId: req.params.userId }, 'failed to unban user');
     res.status(500).json({ message: 'Failed to unban user' });
+  }
+});
+
+// AWS Configuration Management Endpoints
+
+// Get current AWS configuration
+app.get('/admin/aws/config', authenticateToken, requirePermission(PERMISSIONS.MANAGE_SYSTEM), async (req, res) => {
+  try {
+    const envManager = new EnvironmentManager();
+    const config = await envManager.getCurrentConfig();
+    const completeness = await envManager.isConfigurationComplete();
+    
+    // Remove sensitive values from response
+    const safeConfig = { ...config };
+    delete safeConfig.AWS_ACCESS_KEY_ID;
+    delete safeConfig.AWS_SECRET_ACCESS_KEY;
+    delete safeConfig.DEEPSEEK_API_KEY;
+    delete safeConfig.JWT_SECRET;
+    
+    res.json({
+      config: safeConfig,
+      completeness
+    });
+  } catch (err) {
+    logger.error({ err }, 'failed to get AWS configuration');
+    res.status(500).json({ message: 'Failed to get AWS configuration' });
+  }
+});
+
+// Update AWS configuration
+app.put('/admin/aws/config', authenticateToken, requirePermission(PERMISSIONS.MANAGE_SYSTEM), async (req, res) => {
+  try {
+    const envManager = new EnvironmentManager();
+    const updatedConfig = await envManager.updateConfig(req.body);
+    
+    // Remove sensitive values from response
+    const safeConfig = { ...updatedConfig };
+    delete safeConfig.AWS_ACCESS_KEY_ID;
+    delete safeConfig.AWS_SECRET_ACCESS_KEY;
+    delete safeConfig.DEEPSEEK_API_KEY;
+    delete safeConfig.JWT_SECRET;
+    
+    res.json({
+      success: true,
+      config: safeConfig
+    });
+  } catch (err) {
+    logger.error({ err }, 'failed to update AWS configuration');
+    res.status(500).json({ message: 'Failed to update AWS configuration' });
+  }
+});
+
+// Validate AWS services
+app.post('/admin/aws/validate', authenticateToken, requirePermission(PERMISSIONS.MANAGE_SYSTEM), async (req, res) => {
+  try {
+    const config = req.body.config || {};
+    const validator = new AWSValidator({
+      region: config.AWS_REGION || process.env.AWS_REGION
+    });
+    
+    const validationConfig = {
+      dynamodbTable: config.DDB_INVESTIGATIONS_TABLE || process.env.DDB_INVESTIGATIONS_TABLE,
+      s3ArtifactsBucket: config.ARTIFACTS_BUCKET || process.env.ARTIFACTS_BUCKET,
+      s3AuditBucket: config.AUDIT_BUCKET || process.env.AUDIT_BUCKET,
+      stateMachineArn: config.STATE_MACHINE_ARN || process.env.STATE_MACHINE_ARN,
+      eventBusName: config.EVENT_BUS_NAME || process.env.EVENT_BUS_NAME || 'default'
+    };
+    
+    const results = await validator.validateAllServices(validationConfig);
+    
+    res.json(results);
+  } catch (err) {
+    logger.error({ err }, 'failed to validate AWS services');
+    res.status(500).json({ message: 'Failed to validate AWS services' });
+  }
+});
+
+// Get environment presets
+app.get('/admin/aws/presets', authenticateToken, requirePermission(PERMISSIONS.MANAGE_SYSTEM), async (req, res) => {
+  try {
+    const envManager = new EnvironmentManager();
+    const presets = envManager.getEnvironmentPresets();
+    
+    res.json({ presets });
+  } catch (err) {
+    logger.error({ err }, 'failed to get environment presets');
+    res.status(500).json({ message: 'Failed to get environment presets' });
+  }
+});
+
+// Apply environment preset
+app.post('/admin/aws/presets/:presetName', authenticateToken, requirePermission(PERMISSIONS.MANAGE_SYSTEM), async (req, res) => {
+  try {
+    const envManager = new EnvironmentManager();
+    const config = await envManager.applyPreset(req.params.presetName);
+    
+    // Remove sensitive values from response
+    const safeConfig = { ...config };
+    delete safeConfig.AWS_ACCESS_KEY_ID;
+    delete safeConfig.AWS_SECRET_ACCESS_KEY;
+    delete safeConfig.DEEPSEEK_API_KEY;
+    delete safeConfig.JWT_SECRET;
+    
+    res.json({
+      success: true,
+      preset: req.params.presetName,
+      config: safeConfig
+    });
+  } catch (err) {
+    logger.error({ err, preset: req.params.presetName }, 'failed to apply environment preset');
+    res.status(500).json({ message: 'Failed to apply environment preset' });
+  }
+});
+
+// Generate IAM policy
+app.get('/admin/aws/iam-policy', authenticateToken, requirePermission(PERMISSIONS.MANAGE_SYSTEM), async (req, res) => {
+  try {
+    const envManager = new EnvironmentManager();
+    const policy = await envManager.generateIAMPolicy();
+    
+    res.json({ policy });
+  } catch (err) {
+    logger.error({ err }, 'failed to generate IAM policy');
+    res.status(500).json({ message: 'Failed to generate IAM policy' });
+  }
+});
+
+// Setup wizard endpoints
+
+// Get setup wizard steps
+app.get('/admin/aws/setup/steps', authenticateToken, requirePermission(PERMISSIONS.MANAGE_SYSTEM), async (req, res) => {
+  try {
+    const wizard = new SetupWizard();
+    const steps = wizard.getSetupSteps();
+    
+    res.json({ steps });
+  } catch (err) {
+    logger.error({ err }, 'failed to get setup steps');
+    res.status(500).json({ message: 'Failed to get setup steps' });
+  }
+});
+
+// Validate setup step
+app.post('/admin/aws/setup/validate/:stepId', authenticateToken, requirePermission(PERMISSIONS.MANAGE_SYSTEM), async (req, res) => {
+  try {
+    const wizard = new SetupWizard();
+    const result = await wizard.validateStep(req.params.stepId, req.body);
+    
+    res.json(result);
+  } catch (err) {
+    logger.error({ err, stepId: req.params.stepId }, 'failed to validate setup step');
+    res.status(500).json({ message: 'Failed to validate setup step' });
+  }
+});
+
+// Complete setup wizard
+app.post('/admin/aws/setup/complete', authenticateToken, requirePermission(PERMISSIONS.MANAGE_SYSTEM), async (req, res) => {
+  try {
+    const wizard = new SetupWizard();
+    const result = await wizard.completeSetup(req.body);
+    
+    res.json(result);
+  } catch (err) {
+    logger.error({ err }, 'failed to complete setup');
+    res.status(500).json({ message: 'Failed to complete setup' });
+  }
+});
+
+// Get deployment instructions
+app.get('/admin/aws/setup/deployment', authenticateToken, requirePermission(PERMISSIONS.MANAGE_SYSTEM), async (req, res) => {
+  try {
+    const wizard = new SetupWizard();
+    const instructions = wizard.getDeploymentInstructions();
+    
+    res.json({ instructions });
+  } catch (err) {
+    logger.error({ err }, 'failed to get deployment instructions');
+    res.status(500).json({ message: 'Failed to get deployment instructions' });
   }
 });
 

@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 from urllib.parse import urlparse
 
 from .data import PIPELINE_STAGES, InvestigationRepository
+from ..agents.automation_metrics import automation_tracker
 
 _REPOSITORY = InvestigationRepository()
 
@@ -31,6 +32,8 @@ class SocRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.OK, {"items": PIPELINE_STAGES})
             elif head == "investigations":
                 self._handle_investigation_route(segments[1:])
+            elif head == "automation":
+                self._handle_automation_route(segments[1:])
             else:
                 self._send_json(HTTPStatus.NOT_FOUND, {"detail": "Unknown endpoint"})
         except Exception as exc:  # pragma: no cover - defensive programming
@@ -90,6 +93,65 @@ class SocRequestHandler(BaseHTTPRequestHandler):
             return
 
         self._send_json(HTTPStatus.NOT_FOUND, {"detail": "Unknown endpoint"})
+
+    def _handle_automation_route(self, segments: List[str]) -> None:
+        """Handle automation metrics endpoints."""
+        if not segments:
+            self._send_json(HTTPStatus.NOT_FOUND, {"detail": "Automation endpoint requires subpath"})
+            return
+            
+        subroute = segments[0].lower()
+        
+        if subroute == "metrics":
+            # Parse query parameters (simplified for this implementation)
+            days = 7  # Default to 7 days
+            
+            # Get automation rate metrics
+            automation_rate = automation_tracker.get_automation_rate(days)
+            
+            # Get confidence distribution
+            confidence_dist = automation_tracker.get_confidence_distribution(days)
+            
+            # Get false positive accuracy
+            fp_accuracy = automation_tracker.get_false_positive_accuracy(days)
+            
+            response = {
+                "automation_metrics": {
+                    "automation_rate": automation_rate,
+                    "confidence_distribution": confidence_dist,
+                    "false_positive_accuracy": fp_accuracy,
+                    "period_days": days,
+                    "target_automation_rate": 0.8,
+                    "target_met": automation_rate.get("target_met", False)
+                }
+            }
+            self._send_json(HTTPStatus.OK, response)
+            return
+            
+        elif subroute == "realtime":
+            # Get today's metrics
+            today_metrics = automation_tracker.get_automation_rate(days=1)
+            
+            # Get recent confidence distribution
+            recent_confidence = automation_tracker.get_confidence_distribution(days=1)
+            
+            response = {
+                "realtime_stats": {
+                    "today_automation_rate": today_metrics.get("automation_rate", 0.0),
+                    "today_investigations": today_metrics.get("total_investigations", 0),
+                    "auto_closed_today": int(today_metrics.get("total_investigations", 0) * today_metrics.get("auto_close_rate", 0.0)),
+                    "escalated_today": int(today_metrics.get("total_investigations", 0) * today_metrics.get("escalation_rate", 0.0)),
+                    "avg_confidence": recent_confidence.get("avg_confidence", 0.0),
+                    "avg_fp_probability": recent_confidence.get("avg_fp_probability", 0.0),
+                    "target_met": today_metrics.get("target_met", False),
+                    "efficiency_improvement": max(0, (today_metrics.get("automation_rate", 0.0) - 0.2) * 100)  # Improvement over 20% baseline
+                }
+            }
+            self._send_json(HTTPStatus.OK, response)
+            return
+            
+        else:
+            self._send_json(HTTPStatus.NOT_FOUND, {"detail": "Unknown automation endpoint"})
 
     # ------------------------------------------------------------------
     def _send_json(self, status: HTTPStatus, payload: Dict[str, Any]) -> None:

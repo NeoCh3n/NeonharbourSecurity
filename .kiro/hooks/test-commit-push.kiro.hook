@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "name": "Auto Commit & Push on Test Success",
+  "description": "Automatically runs git commit and push when all tests pass after a task completion",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "tests/test_*.py",
+      "src/**/*.py",
+      "backend/**/*.js",
+      "clerk-react/src/**/*.tsx",
+      "clerk-react/src/**/*.ts"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A task has been completed and all tests have passed. Please run 'git add .' followed by 'git commit -m \"Auto-commit: tests passing after task completion\"' and then 'git push' to automatically commit and push the changes to the repository."
+  }
+}

@@ -104,8 +104,11 @@ class BedrockAnalyst(AnalystLLM):
                 "summary": content,
                 "risk_level": "unknown",
                 "confidence": 0.4,
+                "false_positive_likelihood": 0.5,
+                "automation_recommendation": "monitor",
                 "recommended_actions": [],
                 "timeline": [],
+                "confidence_factors": {"parsing_error": "Failed to parse AI response"}
             }
         summary["model"] = self._config.text_model_id
         summary["provider"] = self.provider
@@ -176,9 +179,13 @@ class BedrockAnalyst(AnalystLLM):
 
     def _system_prompt(self) -> str:
         return (
-            "You are an HKMA-aware SOC analyst. Always return JSON with keys: "
-            "summary, risk_level (low|medium|high), confidence (0-1 float), timeline (array of steps), "
-            "recommended_actions (array of {action_id, description, rationale}). "
+            "You are an HKMA-aware SOC analyst specializing in false positive detection and automation. "
+            "Always return JSON with keys: "
+            "summary, risk_level (low|medium|high), confidence (0-1 float), "
+            "false_positive_likelihood (0-1 float), automation_recommendation (auto_close|monitor|escalate), "
+            "timeline (array of steps), recommended_actions (array of {action_id, description, rationale}), "
+            "confidence_factors (object with reasoning for confidence assessment). "
+            "Focus on identifying false positives to achieve 80%+ automation rate while ensuring genuine threats are escalated. "
             "Only use approved action_id values."
         )
 
@@ -186,8 +193,19 @@ class BedrockAnalyst(AnalystLLM):
         context = json.dumps(investigation, indent=2)
         return (
             "Investigate the following security alert for a Hong Kong financial institution. "
+            "Focus on false positive detection to achieve 80%+ automation rate while ensuring genuine threats are escalated. "
+            "Analyze patterns that indicate false positives such as: internal sources, low severity, "
+            "repetitive alerts, known safe applications, administrative activities, and system processes. "
             "Tie controls back to HKMA SA-2 and TM-G-1 where relevant. Provide citations if the "
             "knowledge base includes matching documents.\n\n"
+            "Consider these false positive indicators:\n"
+            "- Internal IP addresses (10.x, 192.168.x, 172.x ranges)\n"
+            "- Low/informational severity levels\n"
+            "- Repetitive alerts from same source\n"
+            "- Administrative or system maintenance activities\n"
+            "- Known safe applications and processes\n"
+            "- Business hours vs off-hours timing\n"
+            "- Whitelisted domains and resources\n\n"
             f"Alert context:\n{context}"
         )
 

@@ -1,5 +1,5 @@
 import './App.css';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AppLayout,
   Badge,
@@ -37,7 +37,8 @@ import { useAuth, PERMISSIONS } from './hooks/useAuth';
 import { useApiClient } from './lib/api';
 import { RequirePermission } from './components/ProtectedComponent';
 import { useSessionManager } from './hooks/useSessionManager';
-import { AdminUserManagement } from './components/AdminUserManagement';
+// import { AdminUserManagement } from './components/AdminUserManagement';
+import { AdminDashboard } from './components/AdminDashboard';
 import { AuthTest } from './components/AuthTest';
 import { AuthConfig } from './components/AuthConfig';
 
@@ -195,8 +196,16 @@ const stageIndicatorMap: Record<string, StatusIndicatorProps.Type> = {
   closed: 'success',
 };
 
-const createNavItems = (user: ReturnType<typeof useAuth>['user']) => {
-  const items: any[] = [];
+type NavigationItem = {
+  type: 'link' | 'divider';
+  text?: string;
+  href?: string;
+  info?: React.ReactNode;
+  onClick?: () => void;
+};
+
+const createNavItems = (user: ReturnType<typeof useAuth>['user']): NavigationItem[] => {
+  const items: NavigationItem[] = [];
 
   // Always show investigations if user has permission
   if (user?.permissions.includes(PERMISSIONS.VIEW_INVESTIGATIONS)) {
@@ -224,12 +233,8 @@ const createNavItems = (user: ReturnType<typeof useAuth>['user']) => {
   }
 
   // Admin section
-  if (user?.permissions.includes(PERMISSIONS.MANAGE_USERS)) {
-    items.push({ type: 'link', text: 'User Management', href: '#admin/users' });
-  }
-
-  if (user?.permissions.includes(PERMISSIONS.CONFIGURE_SYSTEM)) {
-    items.push({ type: 'link', text: 'System Config', href: '#admin/system' });
+  if (user?.permissions.includes(PERMISSIONS.CONFIGURE_SYSTEM) || user?.permissions.includes(PERMISSIONS.MANAGE_USERS)) {
+    items.push({ type: 'link', text: 'Administration', href: '#admin' });
   }
 
   // Settings for all authenticated users
@@ -824,25 +829,25 @@ export default function App() {
   const isDetailFallback = detailQuery.isError || (!detailQuery.data && !!detailData);
   const timelineData: TimelineEvent[] = timelineQuery.data ?? [];
 
-  const refreshAll = () => {
+  const refreshAll = useCallback(() => {
     investigationsQuery.refetch();
     if (selectedId) {
       detailQuery.refetch();
       timelineQuery.refetch();
     }
-  };
+  }, [investigationsQuery, detailQuery, timelineQuery, selectedId]);
 
   const navItems = useMemo(() => {
     const baseItems = createNavItems(user);
 
     // Add investigation count badge if investigations are visible
-    const investigationsItem = baseItems.find((item: any) => item.text === 'Investigations');
+    const investigationsItem = baseItems.find((item) => item.text === 'Investigations');
     if (investigationsItem && investigations.length > 0) {
       investigationsItem.info = <Badge color="blue">{investigations.length}</Badge>;
     }
 
     // Add click handlers for navigation
-    const itemsWithHandlers = baseItems.map((item: any) => {
+    const itemsWithHandlers = baseItems.map((item) => {
       if (item.type === 'divider') return item;
 
       return {
@@ -850,7 +855,7 @@ export default function App() {
         href: item.href, // Keep href for proper navigation
         onClick: () => {
           if (item.text === 'Investigations') setCurrentView('investigations');
-          else if (item.text === 'User Management') setCurrentView('admin-users');
+          else if (item.text === 'Administration') setCurrentView('admin');
           else if (item.text === 'Demo Controls') setCurrentView('demo');
           else if (item.text === 'Settings') setCurrentView('auth-test');
         }
@@ -889,7 +894,7 @@ export default function App() {
           text: '',
           ariaLabel: 'User menu',
           iconSvg: <UserButton afterSignOutUrl="/" />,
-        } as any,
+        } as const,
       ]}
     />
   );
@@ -948,7 +953,7 @@ export default function App() {
                   }
                 >
                   {currentView === 'investigations' && 'SOC Command Overview'}
-                  {currentView === 'admin-users' && 'User Management'}
+                  {currentView === 'admin' && 'System Administration'}
                   {currentView === 'demo' && 'Demo Controls'}
                   {currentView === 'auth-test' && 'Authentication Test'}
                   {currentView === 'settings' && 'Settings'}
@@ -988,7 +993,7 @@ export default function App() {
                   </RequirePermission>
                 )}
 
-                {currentView === 'admin-users' && <AdminUserManagement />}
+                {currentView === 'admin' && <AdminDashboard />}
 
                 {currentView === 'demo' && (
                   <RequirePermission permission={PERMISSIONS.START_DEMO} showFallback>

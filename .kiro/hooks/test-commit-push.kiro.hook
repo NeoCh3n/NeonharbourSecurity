@@ -15,6 +15,6 @@
   },
   "then": {
     "type": "askAgent",
-    "prompt": "A task has been completed and all tests have passed. Please run 'git add .' followed by 'git commit -m \"Auto-commit: tests passing after task completion\"' and then 'git push' to automatically commit and push the changes to the repository."
+    "prompt": "A task has been completed and all tests have passed. Please run 'git add .' followed by 'git commit -m \" the descriiption of this commit\"' and then 'git push' to automatically commit and push the changes to the repository. the descriiption of this commit should summay current commit."
   }
 }

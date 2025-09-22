@@ -212,13 +212,20 @@ class BedrockAnalyst(AnalystLLM):
     def _allowed_actions(self, summary: Dict[str, Any]) -> List[Dict[str, str]]:
         allowed = []
         for action in summary.get("recommended_actions", []):
-            action_id = action.get("action_id") or action.get("id")
-            if action_id in _ALLOWED_ACTIONS:
-                allowed.append({
-                    "action_id": action_id,
-                    "description": action.get("description", ""),
-                    "rationale": action.get("rationale", ""),
-                })
+            # Handle string actions (skip non-structured actions)
+            if isinstance(action, str):
+                # Skip string actions like "DROP_TABLE" that aren't structured
+                continue
+            
+            # Handle object actions
+            if isinstance(action, dict):
+                action_id = action.get("action_id") or action.get("id")
+                if action_id and action_id in _ALLOWED_ACTIONS:
+                    allowed.append({
+                        "action_id": action_id,
+                        "description": action.get("description", ""),
+                        "rationale": action.get("rationale", ""),
+                    })
         return allowed
 
     def record_feedback(

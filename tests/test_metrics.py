@@ -30,10 +30,14 @@ class StubDynamo:
 
 def test_response_agent_metrics(monkeypatch):
     from src.agents import response as response_module
+    import boto3
 
     stub_dynamo = StubDynamo()
     monkeypatch.setattr(response_module, "dynamodb", stub_dynamo)
     monkeypatch.setattr(response_module, "log_stage_event", lambda **kwargs: {"stage": kwargs["stage"]})
+    
+    # Mock boto3.resource to return our stub for any table access
+    monkeypatch.setattr(boto3, "resource", lambda service_name: stub_dynamo)
 
     agent = ResponseAgent(StubBus())
 

@@ -4,7 +4,7 @@ from src.pipeline import journal
 def test_log_stage_event_generates_checksum(monkeypatch):
     captured = {}
 
-    def fake_put_object(self, **kwargs):  # pragma: no cover - boto3 client stub
+    def fake_put_object(**kwargs):  # pragma: no cover - boto3 client stub
         captured.update(kwargs)
 
     monkeypatch.setattr(journal.S3, "put_object", fake_put_object)

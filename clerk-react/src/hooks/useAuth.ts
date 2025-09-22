@@ -88,9 +88,8 @@ export function useAuth() {
   const authUser = useMemo((): AuthUser | null => {
     if (!isSignedIn || !user) return null;
 
-    // Get role from user metadata (check both public and private metadata)
+    // Get role from user metadata (check public metadata)
     const role = (user.publicMetadata?.role as UserRole) || 
-                 (user.privateMetadata?.role as UserRole) ||
                  USER_ROLES.VIEWER;
 
     // Get permissions based on role
@@ -98,8 +97,7 @@ export function useAuth() {
 
     // Check if this is a demo user
     const isDemo = role === USER_ROLES.DEMO_USER || 
-                   user.publicMetadata?.isDemo === true ||
-                   user.privateMetadata?.isDemo === true;
+                   user.publicMetadata?.isDemo === true;
 
     return {
       id: user.id,

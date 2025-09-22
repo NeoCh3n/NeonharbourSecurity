@@ -11,6 +11,7 @@ import boto3
 
 from ..ai import AmazonQAnalyst, AnalystLLM, BedrockAnalyst, KiroAnalyst
 from ..pipeline.journal import log_stage_event
+from ..utils.dynamodb import prepare_confidence_metrics, to_decimal
 from .base import Agent, ConfidenceScore
 from decimal import Decimal
 
@@ -38,13 +39,13 @@ class AnalysisAgent(Agent):
 
         # Enhanced confidence scoring and false positive detection
         confidence_score = self.calculate_enhanced_confidence_score(event, summary)
-        summary["confidence_metrics"] = {
-            "overall_confidence": float(confidence_score.overall_confidence),
-            "false_positive_probability": float(confidence_score.false_positive_probability),
-            "automation_confidence": float(confidence_score.automation_confidence),
+        summary["confidence_metrics"] = prepare_confidence_metrics({
+            "overall_confidence": confidence_score.overall_confidence,
+            "false_positive_probability": confidence_score.false_positive_probability,
+            "automation_confidence": confidence_score.automation_confidence,
             "reasoning": confidence_score.reasoning,
-            "factors": {k: float(v) for k, v in confidence_score.factors.items()}
-        }
+            "factors": confidence_score.factors
+        })
 
         # Enhanced false positive detection
         fp_assessment = self._assess_false_positive_likelihood(event, summary)
@@ -74,16 +75,16 @@ class AnalysisAgent(Agent):
                 "provider": summary.get("provider"),
                 "latency_ms": summary.get("latency_ms"),
                 "risk_level": summary.get("risk_level"),
-                "confidence_score": confidence_score.overall_confidence,
-                "false_positive_probability": confidence_score.false_positive_probability,
+                "confidence_score": to_decimal(confidence_score.overall_confidence),
+                "false_positive_probability": to_decimal(confidence_score.false_positive_probability),
             },
         )
 
         self.emit({
             "investigationId": investigation_id, 
             "provider": summary.get("provider"),
-            "confidence_score": confidence_score.overall_confidence,
-            "false_positive_probability": confidence_score.false_positive_probability
+            "confidence_score": to_decimal(confidence_score.overall_confidence),
+            "false_positive_probability": to_decimal(confidence_score.false_positive_probability)
         })
 
         return {

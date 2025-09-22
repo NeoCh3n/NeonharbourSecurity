@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box,
   StatusIndicator,
@@ -145,7 +145,7 @@ export function AuthStatus() {
         </Box>
 
         {tokenInfo && (
-          <Container header={<Header variant="h4">JWT Token Information</Header>}>
+          <Container header={<Header variant="h3">JWT Token Information</Header>}>
             <ColumnLayout columns={2} variant="text-grid">
               <Box>
                 <Box variant="awsui-key-label">Token Status</Box>

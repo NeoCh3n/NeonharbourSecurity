@@ -70,6 +70,22 @@ def handler(event, _context):
         payload={"auditKey": key, "checksum_sha256": checksum},
     )
 
+    # Complete progress tracking
+    try:
+        from ..demo.progress_tracker import progress_tracker
+        progress_tracker.update_agent_progress(
+            investigation_id=investigation_id,
+            tenant_id=tenant_id,
+            stage="report",
+            agent_name="Audit Scribe",
+            status="completed",
+            current_task="Investigation completed and audit artifacts generated",
+            progress_percentage=100.0,
+            artifacts=["Audit JSONL", "Compliance bundle", f"S3 key: {key}"]
+        )
+    except ImportError:
+        pass  # Progress tracking not available
+
     return {
         "investigationId": investigation_id,
         "tenantId": tenant_id,

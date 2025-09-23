@@ -19,6 +19,7 @@ def handler(event, _context):
     investigation_id = detail.get("investigationId") or str(uuid.uuid4())
     tenant_id = detail.get("tenantId") or DEFAULT_TENANT
     received_at = detail.get("receivedAt") or datetime.now(timezone.utc).isoformat()
+    is_demo = detail.get("alert", {}).get("isDemo", False)
 
     record = {
         "pk": f"TENANT#{tenant_id}",
@@ -36,6 +37,17 @@ def handler(event, _context):
     table = dynamodb.Table(DDB_TABLE)
     table.put_item(Item=record)
 
+    # Initialize progress tracking
+    try:
+        from ..demo.progress_tracker import progress_tracker
+        progress_tracker.start_investigation_tracking(
+            investigation_id=investigation_id,
+            tenant_id=tenant_id,
+            is_demo=is_demo
+        )
+    except ImportError:
+        pass  # Progress tracking not available
+
     audit_meta = log_stage_event(
         tenant_id=tenant_id,
         investigation_id=investigation_id,
@@ -44,6 +56,7 @@ def handler(event, _context):
             "receivedAt": received_at,
             "alert": detail.get("alert", {}),
             "source": detail.get("source", "eventbridge"),
+            "is_demo": is_demo,
         },
     )
 

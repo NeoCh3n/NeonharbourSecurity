@@ -26,73 +26,117 @@ class AnalysisAgent(Agent):
     def handle(self, event: Dict[str, Any]) -> Dict[str, Any]:
         investigation_id = event["investigationId"]
         tenant_id = event.get("tenantId") or os.getenv("DEFAULT_TENANT_ID", "default")
-        analyst = self._select_analyst()
+        
+        # Start progress tracking
+        self.start_processing(investigation_id, tenant_id, "Analyzing alert with AI-powered reasoning")
+        
         try:
-            summary = analyst.summarize_investigation(event)
-        except NotImplementedError:
-            fallback = BedrockAnalyst()
-            summary = fallback.summarize_investigation(event)
-            summary["provider"] = "bedrock"
+            # Update progress: Starting AI analysis
+            self.track_progress(
+                investigation_id, tenant_id, "running", 
+                "Initializing AI analyst", 25.0
+            )
+            
+            analyst = self._select_analyst()
+            
+            # Update progress: Running AI analysis
+            self.track_progress(
+                investigation_id, tenant_id, "running", 
+                "Running AI analysis and risk assessment", 50.0
+            )
+            
+            try:
+                summary = analyst.summarize_investigation(event)
+            except NotImplementedError:
+                fallback = BedrockAnalyst()
+                summary = fallback.summarize_investigation(event)
+                summary["provider"] = "bedrock"
 
-        knowledge = self._load_knowledge_summary()
-        summary["knowledge_context"] = list(knowledge.values())[:5]
+            # Update progress: Loading knowledge context
+            self.track_progress(
+                investigation_id, tenant_id, "running", 
+                "Loading knowledge context and HKMA mappings", 70.0
+            )
+            
+            knowledge = self._load_knowledge_summary()
+            summary["knowledge_context"] = list(knowledge.values())[:5]
 
-        # Enhanced confidence scoring and false positive detection
-        confidence_score = self.calculate_enhanced_confidence_score(event, summary)
-        summary["confidence_metrics"] = prepare_confidence_metrics({
-            "overall_confidence": confidence_score.overall_confidence,
-            "false_positive_probability": confidence_score.false_positive_probability,
-            "automation_confidence": confidence_score.automation_confidence,
-            "reasoning": confidence_score.reasoning,
-            "factors": confidence_score.factors
-        })
+            # Enhanced confidence scoring and false positive detection
+            confidence_score = self.calculate_enhanced_confidence_score(event, summary)
+            summary["confidence_metrics"] = prepare_confidence_metrics({
+                "overall_confidence": confidence_score.overall_confidence,
+                "false_positive_probability": confidence_score.false_positive_probability,
+                "automation_confidence": confidence_score.automation_confidence,
+                "reasoning": confidence_score.reasoning,
+                "factors": confidence_score.factors
+            })
 
-        # Enhanced false positive detection
-        fp_assessment = self._assess_false_positive_likelihood(event, summary)
-        summary["false_positive_assessment"] = fp_assessment
+            # Enhanced false positive detection
+            fp_assessment = self._assess_false_positive_likelihood(event, summary)
+            summary["false_positive_assessment"] = fp_assessment
 
-        now = datetime.now(timezone.utc).isoformat()
-        table = dynamodb.Table(DDB_TABLE)
-        table.update_item(
-            Key={
-                "pk": f"TENANT#{tenant_id}",
-                "sk": f"INVESTIGATION#{investigation_id}",
-            },
-            UpdateExpression="SET #stage = :stage, summary = :summary, updatedAt = :now",
-            ExpressionAttributeNames={"#stage": "stage"},
-            ExpressionAttributeValues={
-                ":stage": "summarized",
-                ":summary": summary,
-                ":now": now,
-            },
-        )
+            # Update progress: Persisting analysis results
+            self.track_progress(
+                investigation_id, tenant_id, "running", 
+                "Persisting analysis results and confidence metrics", 90.0
+            )
 
-        audit_meta = log_stage_event(
-            tenant_id=tenant_id,
-            investigation_id=investigation_id,
-            stage=self.stage,
-            payload={
+            now = datetime.now(timezone.utc).isoformat()
+            table = dynamodb.Table(DDB_TABLE)
+            table.update_item(
+                Key={
+                    "pk": f"TENANT#{tenant_id}",
+                    "sk": f"INVESTIGATION#{investigation_id}",
+                },
+                UpdateExpression="SET #stage = :stage, summary = :summary, updatedAt = :now",
+                ExpressionAttributeNames={"#stage": "stage"},
+                ExpressionAttributeValues={
+                    ":stage": "summarized",
+                    ":summary": summary,
+                    ":now": now,
+                },
+            )
+
+            audit_meta = log_stage_event(
+                tenant_id=tenant_id,
+                investigation_id=investigation_id,
+                stage=self.stage,
+                payload={
+                    "provider": summary.get("provider"),
+                    "latency_ms": summary.get("latency_ms"),
+                    "risk_level": summary.get("risk_level"),
+                    "confidence_score": to_decimal(confidence_score.overall_confidence),
+                    "false_positive_probability": to_decimal(confidence_score.false_positive_probability),
+                },
+            )
+
+            self.emit({
+                "investigationId": investigation_id, 
                 "provider": summary.get("provider"),
-                "latency_ms": summary.get("latency_ms"),
-                "risk_level": summary.get("risk_level"),
                 "confidence_score": to_decimal(confidence_score.overall_confidence),
-                "false_positive_probability": to_decimal(confidence_score.false_positive_probability),
-            },
-        )
+                "false_positive_probability": to_decimal(confidence_score.false_positive_probability)
+            })
 
-        self.emit({
-            "investigationId": investigation_id, 
-            "provider": summary.get("provider"),
-            "confidence_score": to_decimal(confidence_score.overall_confidence),
-            "false_positive_probability": to_decimal(confidence_score.false_positive_probability)
-        })
+            # Complete progress tracking
+            self.complete_processing(
+                investigation_id, tenant_id,
+                artifacts=["Structured summary", "HKMA mappings", "Confidence metrics"],
+                confidence_score=confidence_score.overall_confidence,
+                false_positive_probability=confidence_score.false_positive_probability,
+                risk_level=summary.get("risk_level")
+            )
 
-        return {
-            **event,
-            "summary": summary,
-            "updatedAt": now,
-            "audit": audit_meta,
-        }
+            return {
+                **event,
+                "summary": summary,
+                "updatedAt": now,
+                "audit": audit_meta,
+            }
+            
+        except Exception as e:
+            # Track failure
+            self.fail_processing(investigation_id, tenant_id, str(e))
+            raise
 
     def _select_analyst(self) -> AnalystLLM:
         provider = (os.getenv("AI_PROVIDER") or "bedrock").lower()

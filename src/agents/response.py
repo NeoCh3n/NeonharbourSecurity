@@ -31,11 +31,29 @@ class ResponseAgent(Agent):
     }
 
     def handle(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        investigation_id = event["investigationId"]
+        tenant_id = event.get("tenantId") or os.getenv("DEFAULT_TENANT_ID", "default")
+        
+        # Start progress tracking
+        self.start_processing(investigation_id, tenant_id, "Computing risk assessment and automation decision")
+        
         summary = event.get("summary", {})
+        
+        # Update progress: Making escalation decision
+        self.track_progress(
+            investigation_id, tenant_id, "running", 
+            "Analyzing risk factors and making escalation decision", 30.0
+        )
         
         # Enhanced risk assessment with automation decision
         escalation_decision = self._make_escalation_decision(event, summary)
         risk_assessment = self._enhanced_risk_assessment(event, summary, escalation_decision)
+        
+        # Update progress: Computing metrics
+        self.track_progress(
+            investigation_id, tenant_id, "running", 
+            "Computing MTTA/MTTI/MTTR metrics and automation statistics", 60.0
+        )
         
         # Compute metrics including automation statistics
         metrics_snapshot = self._compute_enhanced_metrics(event, escalation_decision)
@@ -119,6 +137,28 @@ class ResponseAgent(Agent):
             risk_level=risk_assessment["level"],
             scenario_type=event.get("alert", {}).get("scenarioType"),
             is_demo=event.get("alert", {}).get("isDemo", False)
+        )
+
+        # Track automation decision in progress tracker
+        if self.progress_tracker:
+            try:
+                self.progress_tracker.update_automation_decision(
+                    investigation_id=investigation_id,
+                    tenant_id=tenant_id,
+                    automation_decision=escalation_decision.automation_action,
+                    should_escalate=escalation_decision.should_escalate,
+                    reasoning=escalation_decision.reasoning
+                )
+            except Exception as e:
+                print(f"Error tracking automation decision: {e}")
+
+        # Complete progress tracking
+        self.complete_processing(
+            investigation_id, tenant_id,
+            artifacts=["Risk snapshot", "Action queue", "Automation decision"],
+            confidence_score=confidence_metrics.get("overall_confidence", 0.5),
+            false_positive_probability=confidence_metrics.get("false_positive_probability", 0.5),
+            risk_level=risk_assessment["level"]
         )
 
         self.emit({

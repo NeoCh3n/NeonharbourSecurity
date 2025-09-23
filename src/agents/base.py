@@ -34,6 +34,12 @@ class Agent(ABC):
 
     def __init__(self, messaging):
         self.messaging = messaging
+        # Import here to avoid circular imports
+        try:
+            from ..demo.progress_tracker import progress_tracker
+            self.progress_tracker = progress_tracker
+        except ImportError:
+            self.progress_tracker = None
 
     @abstractmethod
     def handle(self, event: Dict[str, Any]) -> Dict[str, Any]:
@@ -42,6 +48,83 @@ class Agent(ABC):
     def emit(self, detail: Dict[str, Any]) -> None:
         """Publish telemetry about agent activity."""
         self.messaging.publish(agent_name=self.name, stage=self.stage, detail=detail)
+
+    def track_progress(
+        self,
+        investigation_id: str,
+        tenant_id: str,
+        status: str,
+        current_task: Optional[str] = None,
+        progress_percentage: Optional[float] = None,
+        artifacts: Optional[list] = None,
+        confidence_score: Optional[float] = None,
+        false_positive_probability: Optional[float] = None,
+        risk_level: Optional[str] = None
+    ) -> None:
+        """Track agent progress for real-time monitoring."""
+        if self.progress_tracker:
+            try:
+                self.progress_tracker.update_agent_progress(
+                    investigation_id=investigation_id,
+                    tenant_id=tenant_id,
+                    stage=self.stage,
+                    agent_name=self.name,
+                    status=status,
+                    current_task=current_task,
+                    progress_percentage=progress_percentage,
+                    artifacts=artifacts,
+                    confidence_score=confidence_score,
+                    false_positive_probability=false_positive_probability,
+                    risk_level=risk_level
+                )
+            except Exception as e:
+                print(f"Error tracking progress for {self.name}: {e}")
+
+    def start_processing(self, investigation_id: str, tenant_id: str, task_description: str = None) -> None:
+        """Mark agent as starting processing."""
+        self.track_progress(
+            investigation_id=investigation_id,
+            tenant_id=tenant_id,
+            status="running",
+            current_task=task_description or f"Processing {self.stage} stage",
+            progress_percentage=0.0
+        )
+
+    def complete_processing(
+        self,
+        investigation_id: str,
+        tenant_id: str,
+        artifacts: Optional[list] = None,
+        confidence_score: Optional[float] = None,
+        false_positive_probability: Optional[float] = None,
+        risk_level: Optional[str] = None
+    ) -> None:
+        """Mark agent as completed processing."""
+        self.track_progress(
+            investigation_id=investigation_id,
+            tenant_id=tenant_id,
+            status="completed",
+            progress_percentage=100.0,
+            artifacts=artifacts,
+            confidence_score=confidence_score,
+            false_positive_probability=false_positive_probability,
+            risk_level=risk_level
+        )
+
+    def fail_processing(self, investigation_id: str, tenant_id: str, error_message: str) -> None:
+        """Mark agent as failed processing."""
+        if self.progress_tracker:
+            try:
+                self.progress_tracker.update_agent_progress(
+                    investigation_id=investigation_id,
+                    tenant_id=tenant_id,
+                    stage=self.stage,
+                    agent_name=self.name,
+                    status="failed",
+                    error_message=error_message
+                )
+            except Exception as e:
+                print(f"Error tracking failure for {self.name}: {e}")
 
     def calculate_confidence_score(self, analysis_data: Dict[str, Any]) -> ConfidenceScore:
         """Calculate confidence metrics for false positive detection."""

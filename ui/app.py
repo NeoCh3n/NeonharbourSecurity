@@ -649,110 +649,128 @@ def render_demo_progress_tracking() -> None:
     
     st.subheader("📊 Demo Progress Tracking")
     
-    # Session overview
-    col1, col2, col3, col4 = st.columns(4)
-    
-    metrics = current_session.get("metrics", {})
-    
-    with col1:
-        st.metric(
-            "Alerts Generated",
-            metrics.get("alerts_generated", 0),
-            delta=f"+{metrics.get('recent_alerts', 0)} recent"
-        )
-    
-    with col2:
-        st.metric(
-            "Auto-Closed",
-            metrics.get("auto_closed_count", 0),
-            delta=f"{metrics.get('automation_rate', 0):.1%} rate"
-        )
-    
-    with col3:
-        st.metric(
-            "Escalated",
-            metrics.get("escalated_count", 0),
-            delta=f"{100 - metrics.get('automation_rate', 0) * 100:.1%} rate"
-        )
-    
-    with col4:
-        session_duration = (datetime.now() - current_session.get("started_at", datetime.now())).total_seconds() / 60
-        st.metric(
-            "Session Duration",
-            f"{session_duration:.1f} min",
-            delta="Active"
-        )
-    
-    # Progress visualization
-    if metrics.get("alerts_generated", 0) > 0:
-        progress_data = {
-            "Status": ["Auto-Closed", "Escalated", "Processing"],
-            "Count": [
-                metrics.get("auto_closed_count", 0),
-                metrics.get("escalated_count", 0),
-                max(0, metrics.get("alerts_generated", 0) - metrics.get("alerts_processed", 0))
-            ]
-        }
+    # Import progress visualization
+    try:
+        from src.demo.progress_visualization import progress_visualization
         
-        progress_df = pd.DataFrame(progress_data)
+        # Session overview
+        col1, col2, col3, col4 = st.columns(4)
         
-        if alt:
-            chart = (
-                alt.Chart(progress_df)
-                .mark_arc(innerRadius=50)
-                .encode(
-                    theta=alt.Theta(field="Count", type="quantitative"),
-                    color=alt.Color(
-                        field="Status",
-                        type="nominal",
-                        scale=alt.Scale(
-                            domain=["Auto-Closed", "Escalated", "Processing"],
-                            range=["#4ade80", "#f59e0b", "#3b82f6"]
-                        )
-                    ),
-                    tooltip=["Status", "Count"]
-                )
-                .properties(width=200, height=200)
+        metrics = current_session.get("metrics", {})
+        
+        with col1:
+            st.metric(
+                "Alerts Generated",
+                metrics.get("alerts_generated", 0),
+                delta=f"+{metrics.get('recent_alerts', 0)} recent"
             )
-            st.altair_chart(chart, use_container_width=True)
-        else:
-            st.bar_chart(progress_df.set_index("Status"))
-    
-    # Recent activity feed
-    with st.expander("Recent Demo Activity", expanded=True):
-        activity_log = st.session_state.get("demo_activity_log", [])
-        if activity_log:
-            for activity in activity_log[-10:]:  # Show last 10 activities
-                timestamp = activity.get("timestamp", "")
-                message = activity.get("message", "")
-                activity_type = activity.get("type", "info")
+        
+        with col2:
+            st.metric(
+                "Auto-Closed",
+                metrics.get("auto_closed_count", 0),
+                delta=f"{metrics.get('automation_rate', 0):.1%} rate"
+            )
+        
+        with col3:
+            st.metric(
+                "Escalated",
+                metrics.get("escalated_count", 0),
+                delta=f"{100 - metrics.get('automation_rate', 0) * 100:.1%} rate"
+            )
+        
+        with col4:
+            session_duration = (datetime.now() - current_session.get("started_at", datetime.now())).total_seconds() / 60
+            st.metric(
+                "Session Duration",
+                f"{session_duration:.1f} min",
+                delta="Active"
+            )
+        
+        # Progress visualization
+        if metrics.get("alerts_generated", 0) > 0:
+            progress_data = {
+                "Status": ["Auto-Closed", "Escalated", "Processing"],
+                "Count": [
+                    metrics.get("auto_closed_count", 0),
+                    metrics.get("escalated_count", 0),
+                    max(0, metrics.get("alerts_generated", 0) - metrics.get("alerts_processed", 0))
+                ]
+            }
+            
+            progress_df = pd.DataFrame(progress_data)
+            
+            if alt:
+                chart = (
+                    alt.Chart(progress_df)
+                    .mark_arc(innerRadius=50)
+                    .encode(
+                        theta=alt.Theta(field="Count", type="quantitative"),
+                        color=alt.Color(
+                            field="Status",
+                            type="nominal",
+                            scale=alt.Scale(
+                                domain=["Auto-Closed", "Escalated", "Processing"],
+                                range=["#4ade80", "#f59e0b", "#3b82f6"]
+                            )
+                        ),
+                        tooltip=["Status", "Count"]
+                    )
+                    .properties(width=200, height=200)
+                )
+                st.altair_chart(chart, use_container_width=True)
+            else:
+                st.bar_chart(progress_df.set_index("Status"))
+        
+        # Live investigations dashboard
+        tenant_id = os.getenv("DEFAULT_TENANT_ID", "hk-demo")
+        progress_visualization.render_live_investigations_dashboard(tenant_id)
+        
+        # Demo session specific progress
+        session_id = current_session.get("session_id")
+        if session_id:
+            progress_visualization.render_demo_session_progress(session_id)
+        
+        # Recent activity feed
+        with st.expander("Recent Demo Activity", expanded=True):
+            activity_log = st.session_state.get("demo_activity_log", [])
+            if activity_log:
+                for activity in activity_log[-10:]:  # Show last 10 activities
+                    timestamp = activity.get("timestamp", "")
+                    message = activity.get("message", "")
+                    activity_type = activity.get("type", "info")
+                    
+                    if activity_type == "alert_generated":
+                        st.markdown(f"""
+                        <div class='neo-activity-item alert'>
+                            🚨 <strong>{timestamp}</strong>: {message}
+                        </div>
+                        """, unsafe_allow_html=True)
+                    elif activity_type == "auto_closed":
+                        st.markdown(f"""
+                        <div class='neo-activity-item success'>
+                            ✅ <strong>{timestamp}</strong>: {message}
+                        </div>
+                        """, unsafe_allow_html=True)
+                    elif activity_type == "escalated":
+                        st.markdown(f"""
+                        <div class='neo-activity-item warning'>
+                            ⚠️ <strong>{timestamp}</strong>: {message}
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"""
+                        <div class='neo-activity-item'>
+                            ℹ️ <strong>{timestamp}</strong>: {message}
+                        </div>
+                        """, unsafe_allow_html=True)
+            else:
+                st.info("Demo activity will appear here as alerts are generated and processed")
                 
-                if activity_type == "alert_generated":
-                    st.markdown(f"""
-                    <div class='neo-activity-item alert'>
-                        🚨 <strong>{timestamp}</strong>: {message}
-                    </div>
-                    """, unsafe_allow_html=True)
-                elif activity_type == "auto_closed":
-                    st.markdown(f"""
-                    <div class='neo-activity-item success'>
-                        ✅ <strong>{timestamp}</strong>: {message}
-                    </div>
-                    """, unsafe_allow_html=True)
-                elif activity_type == "escalated":
-                    st.markdown(f"""
-                    <div class='neo-activity-item warning'>
-                        ⚠️ <strong>{timestamp}</strong>: {message}
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.markdown(f"""
-                    <div class='neo-activity-item'>
-                        ℹ️ <strong>{timestamp}</strong>: {message}
-                    </div>
-                    """, unsafe_allow_html=True)
-        else:
-            st.info("Demo activity will appear here as alerts are generated and processed")
+    except ImportError as e:
+        st.error(f"Progress visualization not available: {e}")
+        # Fallback to basic progress display
+        st.info("Basic progress tracking - enhanced visualization not available")
 
 
 def update_demo_metrics() -> None:
@@ -2256,6 +2274,118 @@ def display_compliance():
     )
 
 
+def render_realtime_progress_view(mode: str) -> None:
+    """Render real-time investigation progress tracking view."""
+    st.markdown("""
+    <div class='neo-hero'>
+        <h1>🔄 Real-time Investigation Progress</h1>
+        <p>Monitor live investigation progress with agent activity, confidence scores, and automation decisions</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    try:
+        from src.demo.progress_visualization import progress_visualization
+        
+        tenant_id = os.getenv("DEFAULT_TENANT_ID", "hk-demo")
+        
+        # Tab layout for different views
+        tab1, tab2, tab3 = st.tabs(["🚀 Live Dashboard", "🔍 Investigation Details", "📊 Demo Session"])
+        
+        with tab1:
+            st.markdown("### Live Investigations Dashboard")
+            st.caption("Real-time monitoring of all active investigations")
+            
+            # Auto-refresh for live view
+            if st_autorefresh and mode == "Live":
+                st_autorefresh(interval=3000, key="progress-refresh")
+            
+            # Live investigations dashboard
+            progress_visualization.render_live_investigations_dashboard(tenant_id)
+        
+        with tab2:
+            st.markdown("### Individual Investigation Progress")
+            st.caption("Detailed progress tracking for specific investigations")
+            
+            # Investigation selector
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                investigation_id = st.text_input(
+                    "Investigation ID",
+                    placeholder="Enter investigation ID (e.g., INV-20240212-001)",
+                    help="Enter the full investigation ID to track its progress"
+                )
+            with col2:
+                if st.button("Track Investigation", type="primary"):
+                    if investigation_id:
+                        st.session_state["selected_investigation"] = investigation_id
+            
+            # Display selected investigation progress
+            selected_investigation = st.session_state.get("selected_investigation")
+            if selected_investigation:
+                st.markdown(f"**Tracking Investigation:** `{selected_investigation}`")
+                
+                # Investigation timeline
+                progress_visualization.render_investigation_timeline(
+                    selected_investigation, tenant_id
+                )
+                
+                # Confidence and risk display
+                progress_visualization.render_confidence_display(
+                    selected_investigation, tenant_id
+                )
+            else:
+                st.info("Enter an investigation ID above to track its real-time progress")
+        
+        with tab3:
+            st.markdown("### Demo Session Progress")
+            st.caption("Progress tracking for demo sessions and generated investigations")
+            
+            current_session = st.session_state.get("current_demo_session")
+            if current_session:
+                session_id = current_session.get("session_id")
+                if session_id:
+                    progress_visualization.render_demo_session_progress(session_id)
+                else:
+                    st.info("Demo session ID not available")
+            else:
+                st.info("No active demo session. Start a demo from the Operations Console to see progress here.")
+                
+                # Show recent demo investigations anyway
+                st.markdown("**Recent Demo Investigations:**")
+                progress_visualization.render_demo_session_progress("recent")
+        
+        # Additional controls
+        st.markdown("---")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🔄 Refresh All Data"):
+                st.experimental_rerun()
+        
+        with col2:
+            auto_refresh = st.checkbox("Auto-refresh (3s)", value=True)
+            if auto_refresh and st_autorefresh:
+                st_autorefresh(interval=3000, key="manual-progress-refresh")
+        
+        with col3:
+            if st.button("📊 Export Progress Data"):
+                st.info("Progress data export functionality coming soon")
+                
+    except ImportError as e:
+        st.error(f"Progress visualization not available: {e}")
+        st.markdown("""
+        **Progress tracking requires additional components:**
+        - Progress tracker service
+        - Visualization components
+        - Real-time data pipeline
+        
+        Please ensure all demo system components are properly installed.
+        """)
+    except Exception as e:
+        st.error(f"Error loading progress visualization: {e}")
+        st.markdown("Please check the system logs for more details.")
+
+
 def main():
     apply_branding()
     render_brand_header()
@@ -2277,6 +2407,7 @@ def main():
             options=[
                 "Operations Console",
                 "Investigations",
+                "Real-time Progress",
                 "Agents Copilot",
                 "Knowledge Hub",
                 "Compliance",
@@ -2303,6 +2434,8 @@ def main():
         render_operations_view(items, mode)
     elif nav == "Investigations":
         render_investigations_view(items, mode)
+    elif nav == "Real-time Progress":
+        render_realtime_progress_view(mode)
     elif nav == "Agents Copilot":
         render_agents_copilot(items, mode)
     elif nav == "Knowledge Hub":

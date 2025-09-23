@@ -30,6 +30,8 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
 from src.compliance.generate_pack import build_compliance_pack
+from src.demo.controller import DemoSessionController
+from src.demo.integration import DemoPipelineIntegration
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:4000")
 DEMO_TOKEN = os.getenv("DEMO_AUTH_TOKEN", "change-me")
@@ -37,6 +39,9 @@ SEED_DIR = Path("tools/seed")
 LIVE_PIPELINE_ENABLED = os.getenv("LIVE_PIPELINE_ENABLED", "true").lower() not in {"0", "false", "no"}
 LOGO_PATH = Path(__file__).resolve().parent / "assets" / "neo_logo.svg"
 
+# Demo system configuration
+DEMO_CONTROLLER = DemoSessionController()
+DEMO_INTEGRATION = DemoPipelineIntegration()
 
 st.set_page_config(page_title="NeoHarbourSecurity SOC Console", layout="wide")
 
@@ -190,6 +195,59 @@ BRAND_CSS = """
   font-size: 0.85rem;
   color: var(--neo-muted);
 }
+.neo-demo-panel {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.08), rgba(168, 85, 247, 0.06));
+  border-radius: 16px;
+  padding: 1.5rem;
+  border: 1px solid rgba(56, 189, 248, 0.15);
+  margin-bottom: 1rem;
+}
+.neo-demo-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.neo-demo-status.active {
+  background: rgba(74, 222, 128, 0.18);
+  color: var(--neo-success);
+}
+.neo-demo-status.paused {
+  background: rgba(251, 191, 36, 0.18);
+  color: #f59e0b;
+}
+.neo-demo-status.stopped {
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--neo-muted);
+}
+.neo-metric-card {
+  background: var(--neo-card);
+  border-radius: 12px;
+  padding: 1rem;
+  border: 1px solid var(--neo-card-border);
+  text-align: center;
+}
+.neo-activity-item {
+  padding: 0.5rem 0.8rem;
+  border-radius: 8px;
+  margin-bottom: 0.3rem;
+  font-size: 0.85rem;
+}
+.neo-activity-item.alert {
+  background: rgba(239, 68, 68, 0.1);
+  border-left: 3px solid #ef4444;
+}
+.neo-activity-item.success {
+  background: rgba(74, 222, 128, 0.1);
+  border-left: 3px solid #4ade80;
+}
+.neo-activity-item.warning {
+  background: rgba(251, 191, 36, 0.1);
+  border-left: 3px solid #fbbf24;
+}
 </style>
 """
 
@@ -241,9 +299,563 @@ COMPLIANCE_OVERVIEW = [
     {"title": "Audit backlog", "value": "0", "delta": "Cleared"},
 ]
 
+# Demo preset configurations
+DEMO_PRESETS = {
+    "technical_deep_dive": {
+        "name": "Technical Deep Dive",
+        "description": "Comprehensive technical demonstration showing all attack types",
+        "scenario_types": ["phishing_email", "spear_phishing", "ransomware_encryption", "apt_reconnaissance", "insider_data_exfiltration"],
+        "interval_seconds": 45.0,
+        "false_positive_rate": 0.75,
+        "duration_minutes": 30,
+        "target_audience": "technical"
+    },
+    "executive_overview": {
+        "name": "Executive Overview", 
+        "description": "High-level demonstration focusing on business impact",
+        "scenario_types": ["ransomware_encryption", "insider_data_exfiltration", "data_privacy_violation"],
+        "interval_seconds": 60.0,
+        "false_positive_rate": 0.8,
+        "duration_minutes": 15,
+        "target_audience": "executive"
+    },
+    "compliance_focus": {
+        "name": "HKMA Compliance Focus",
+        "description": "Demonstration emphasizing HKMA regulatory compliance",
+        "scenario_types": ["regulatory_violation", "data_privacy_violation", "insider_data_exfiltration"],
+        "interval_seconds": 50.0,
+        "false_positive_rate": 0.85,
+        "duration_minutes": 20,
+        "target_audience": "compliance"
+    },
+    "custom": {
+        "name": "Custom Configuration",
+        "description": "User-defined demo parameters",
+        "scenario_types": ["phishing_email", "malware_detection"],
+        "interval_seconds": 30.0,
+        "false_positive_rate": 0.8,
+        "duration_minutes": None,
+        "target_audience": "technical"
+    }
+}
+
 
 def apply_branding() -> None:
     st.markdown(BRAND_CSS, unsafe_allow_html=True)
+
+
+def render_demo_control_panel() -> None:
+    """Render demo mode controls and status display."""
+    st.markdown("<div class='neo-demo-panel'>", unsafe_allow_html=True)
+    st.subheader("🎯 Interactive Demo Controls")
+    st.caption("Configure and control continuous demo data generation with real-time metrics")
+    
+    # Demo session status
+    demo_session_key = "current_demo_session"
+    current_session = st.session_state.get(demo_session_key)
+    
+    col1, col2, col3 = st.columns([2, 2, 1])
+    
+    with col1:
+        st.markdown("**Demo Status**")
+        if current_session and current_session.get("status") == "active":
+            st.markdown("<div class='neo-demo-status active'>🟢 Demo Active</div>", unsafe_allow_html=True)
+            session_id = current_session.get("session_id", "unknown")[:8]
+            st.caption(f"Session: {session_id}...")
+        elif current_session and current_session.get("status") == "paused":
+            st.markdown("<div class='neo-demo-status paused'>🟡 Demo Paused</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("<div class='neo-demo-status stopped'>⚪ Demo Stopped</div>", unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("**Real-time Metrics**")
+        if current_session:
+            metrics = current_session.get("metrics", {})
+            alerts_generated = metrics.get("alerts_generated", 0)
+            automation_rate = metrics.get("automation_rate", 0.0)
+            
+            # Use custom metric cards
+            st.markdown(f"""
+            <div class='neo-metric-card'>
+                <div style='font-size: 1.5rem; font-weight: bold; color: var(--neo-primary);'>{alerts_generated}</div>
+                <div style='font-size: 0.8rem; color: var(--neo-muted);'>Alerts Generated</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown(f"""
+            <div class='neo-metric-card' style='margin-top: 0.5rem;'>
+                <div style='font-size: 1.5rem; font-weight: bold; color: var(--neo-success);'>{automation_rate:.1%}</div>
+                <div style='font-size: 0.8rem; color: var(--neo-muted);'>Automation Rate</div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div class='neo-metric-card'>
+                <div style='font-size: 1.5rem; font-weight: bold; color: var(--neo-muted);'>0</div>
+                <div style='font-size: 0.8rem; color: var(--neo-muted);'>Alerts Generated</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("""
+            <div class='neo-metric-card' style='margin-top: 0.5rem;'>
+                <div style='font-size: 1.5rem; font-weight: bold; color: var(--neo-muted);'>0%</div>
+                <div style='font-size: 0.8rem; color: var(--neo-muted);'>Automation Rate</div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("**Quick Actions**")
+        if current_session and current_session.get("status") == "active":
+            if st.button("⏸️ Pause", key="pause_demo", use_container_width=True):
+                pause_demo_session()
+            if st.button("⏹️ Stop", key="stop_demo", use_container_width=True, type="secondary"):
+                stop_demo_session()
+        elif current_session and current_session.get("status") == "paused":
+            if st.button("▶️ Resume", key="resume_demo", use_container_width=True):
+                resume_demo_session()
+            if st.button("⏹️ Stop", key="stop_demo_paused", use_container_width=True, type="secondary"):
+                stop_demo_session()
+        else:
+            if st.button("🚀 Start Demo", key="start_demo", use_container_width=True, type="primary"):
+                show_demo_configuration()
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_demo_scenario_selection() -> None:
+    """Render demo scenario selection interface with presets."""
+    st.subheader("📋 Demo Configuration")
+    
+    # Preset selection
+    preset_options = list(DEMO_PRESETS.keys())
+    preset_names = [DEMO_PRESETS[key]["name"] for key in preset_options]
+    
+    selected_preset_idx = st.selectbox(
+        "Demo Preset",
+        range(len(preset_names)),
+        format_func=lambda x: preset_names[x],
+        help="Choose a pre-configured demo scenario or select Custom for manual configuration"
+    )
+    
+    selected_preset_key = preset_options[selected_preset_idx]
+    selected_preset = DEMO_PRESETS[selected_preset_key]
+    
+    st.info(f"**{selected_preset['name']}**: {selected_preset['description']}")
+    
+    # Configuration parameters
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Generation Parameters**")
+        
+        interval_seconds = st.slider(
+            "Alert Generation Interval (seconds)",
+            min_value=10.0,
+            max_value=120.0,
+            value=selected_preset["interval_seconds"],
+            step=5.0,
+            help="Time between generated alerts"
+        )
+        
+        false_positive_rate = st.slider(
+            "False Positive Rate",
+            min_value=0.5,
+            max_value=0.95,
+            value=selected_preset["false_positive_rate"],
+            step=0.05,
+            help="Percentage of alerts that should be false positives (to demonstrate automation)"
+        )
+        
+        duration_minutes = st.number_input(
+            "Demo Duration (minutes)",
+            min_value=1,
+            max_value=120,
+            value=selected_preset["duration_minutes"] or 15,
+            help="Leave empty for continuous generation"
+        )
+    
+    with col2:
+        st.markdown("**Scenario Selection**")
+        
+        # Get available scenarios from demo integration
+        try:
+            available_scenarios = DEMO_INTEGRATION.get_available_demo_scenarios()
+            scenario_options = list(available_scenarios.keys())
+        except Exception as e:
+            st.error(f"Failed to load scenarios: {e}")
+            scenario_options = ["phishing_email", "malware_detection", "insider_threat"]
+            available_scenarios = {}
+        
+        if selected_preset_key == "custom":
+            selected_scenarios = st.multiselect(
+                "Attack Scenarios",
+                scenario_options,
+                default=selected_preset["scenario_types"],
+                help="Select which types of security scenarios to generate"
+            )
+        else:
+            # Show preset scenarios as read-only
+            selected_scenarios = selected_preset["scenario_types"]
+            st.multiselect(
+                "Attack Scenarios (Preset)",
+                scenario_options,
+                default=selected_scenarios,
+                disabled=True,
+                help="Scenarios included in this preset"
+            )
+        
+        target_audience = st.selectbox(
+            "Target Audience",
+            ["technical", "executive", "compliance"],
+            index=["technical", "executive", "compliance"].index(selected_preset["target_audience"]),
+            help="Adjust complexity and focus for different audiences"
+        )
+        
+        # Show scenario details
+        if selected_scenarios and available_scenarios:
+            st.markdown("**Selected Scenarios Preview:**")
+            for scenario in selected_scenarios[:3]:  # Show first 3 scenarios
+                if scenario in available_scenarios:
+                    scenario_info = available_scenarios[scenario]
+                    st.markdown(f"""
+                    <div style='background: rgba(56, 189, 248, 0.05); padding: 0.5rem; border-radius: 8px; margin: 0.3rem 0;'>
+                        <strong>{scenario.replace('_', ' ').title()}</strong><br/>
+                        <small style='color: var(--neo-muted);'>
+                            {scenario_info.get('attack_vector', 'Unknown')} • 
+                            Severity: {scenario_info.get('severity', 'Medium')} • 
+                            Source: {scenario_info.get('source', 'Generic')}
+                        </small>
+                    </div>
+                    """, unsafe_allow_html=True)
+            if len(selected_scenarios) > 3:
+                st.caption(f"... and {len(selected_scenarios) - 3} more scenarios")
+    
+    # Store configuration in session state
+    demo_config = {
+        "preset": selected_preset_key,
+        "scenario_types": selected_scenarios,
+        "interval_seconds": interval_seconds,
+        "false_positive_rate": false_positive_rate,
+        "duration_minutes": duration_minutes if duration_minutes > 0 else None,
+        "target_audience": target_audience
+    }
+    st.session_state["demo_config"] = demo_config
+    
+    # Start demo button
+    if st.button("🎬 Start Demo Session", type="primary", use_container_width=True):
+        start_demo_session(demo_config)
+
+
+def show_demo_configuration() -> None:
+    """Show demo configuration interface."""
+    st.session_state["show_demo_config"] = True
+
+
+def start_demo_session(config: Dict[str, Any]) -> None:
+    """Start a new demo session with the given configuration."""
+    try:
+        # Create demo session using controller
+        result = DEMO_CONTROLLER.start_demo_session(
+            created_by="streamlit_user",
+            tenant_id=os.getenv("DEFAULT_TENANT_ID", "hk-demo"),
+            custom_parameters=config
+        )
+        
+        if result.get("success"):
+            # Store session info in Streamlit session state
+            st.session_state["current_demo_session"] = {
+                "session_id": result["session_id"],
+                "status": "active",
+                "config": config,
+                "started_at": datetime.now(),
+                "metrics": {
+                    "alerts_generated": 0,
+                    "alerts_processed": 0,
+                    "automation_rate": 0.0
+                }
+            }
+            st.success(f"✅ Demo session started: {result['session_id']}")
+            st.session_state["show_demo_config"] = False
+            st.experimental_rerun()
+        else:
+            st.error(f"❌ Failed to start demo: {result.get('message', 'Unknown error')}")
+            
+    except Exception as e:
+        st.error(f"❌ Error starting demo session: {str(e)}")
+
+
+def pause_demo_session() -> None:
+    """Pause the current demo session."""
+    current_session = st.session_state.get("current_demo_session")
+    if current_session:
+        try:
+            session_id = current_session["session_id"]
+            result = DEMO_CONTROLLER.pause_demo_session(session_id)
+            
+            if result.get("success"):
+                current_session["status"] = "paused"
+                st.session_state["current_demo_session"] = current_session
+                st.success("⏸️ Demo session paused")
+                st.experimental_rerun()
+            else:
+                st.error(f"Failed to pause demo: {result.get('message')}")
+        except Exception as e:
+            st.error(f"Error pausing demo: {str(e)}")
+
+
+def resume_demo_session() -> None:
+    """Resume the current demo session."""
+    current_session = st.session_state.get("current_demo_session")
+    if current_session:
+        try:
+            session_id = current_session["session_id"]
+            result = DEMO_CONTROLLER.resume_demo_session(session_id)
+            
+            if result.get("success"):
+                current_session["status"] = "active"
+                st.session_state["current_demo_session"] = current_session
+                st.success("▶️ Demo session resumed")
+                st.experimental_rerun()
+            else:
+                st.error(f"Failed to resume demo: {result.get('message')}")
+        except Exception as e:
+            st.error(f"Error resuming demo: {str(e)}")
+
+
+def stop_demo_session() -> None:
+    """Stop the current demo session."""
+    current_session = st.session_state.get("current_demo_session")
+    if current_session:
+        try:
+            session_id = current_session["session_id"]
+            result = DEMO_CONTROLLER.stop_demo_session(session_id)
+            
+            if result.get("success"):
+                st.session_state["current_demo_session"] = None
+                st.session_state["show_demo_config"] = False
+                st.success("⏹️ Demo session stopped")
+                st.experimental_rerun()
+            else:
+                st.error(f"Failed to stop demo: {result.get('message')}")
+        except Exception as e:
+            st.error(f"Error stopping demo: {str(e)}")
+
+
+def render_demo_progress_tracking() -> None:
+    """Render real-time demo progress and investigation tracking."""
+    current_session = st.session_state.get("current_demo_session")
+    if not current_session:
+        return
+    
+    st.subheader("📊 Demo Progress Tracking")
+    
+    # Session overview
+    col1, col2, col3, col4 = st.columns(4)
+    
+    metrics = current_session.get("metrics", {})
+    
+    with col1:
+        st.metric(
+            "Alerts Generated",
+            metrics.get("alerts_generated", 0),
+            delta=f"+{metrics.get('recent_alerts', 0)} recent"
+        )
+    
+    with col2:
+        st.metric(
+            "Auto-Closed",
+            metrics.get("auto_closed_count", 0),
+            delta=f"{metrics.get('automation_rate', 0):.1%} rate"
+        )
+    
+    with col3:
+        st.metric(
+            "Escalated",
+            metrics.get("escalated_count", 0),
+            delta=f"{100 - metrics.get('automation_rate', 0) * 100:.1%} rate"
+        )
+    
+    with col4:
+        session_duration = (datetime.now() - current_session.get("started_at", datetime.now())).total_seconds() / 60
+        st.metric(
+            "Session Duration",
+            f"{session_duration:.1f} min",
+            delta="Active"
+        )
+    
+    # Progress visualization
+    if metrics.get("alerts_generated", 0) > 0:
+        progress_data = {
+            "Status": ["Auto-Closed", "Escalated", "Processing"],
+            "Count": [
+                metrics.get("auto_closed_count", 0),
+                metrics.get("escalated_count", 0),
+                max(0, metrics.get("alerts_generated", 0) - metrics.get("alerts_processed", 0))
+            ]
+        }
+        
+        progress_df = pd.DataFrame(progress_data)
+        
+        if alt:
+            chart = (
+                alt.Chart(progress_df)
+                .mark_arc(innerRadius=50)
+                .encode(
+                    theta=alt.Theta(field="Count", type="quantitative"),
+                    color=alt.Color(
+                        field="Status",
+                        type="nominal",
+                        scale=alt.Scale(
+                            domain=["Auto-Closed", "Escalated", "Processing"],
+                            range=["#4ade80", "#f59e0b", "#3b82f6"]
+                        )
+                    ),
+                    tooltip=["Status", "Count"]
+                )
+                .properties(width=200, height=200)
+            )
+            st.altair_chart(chart, use_container_width=True)
+        else:
+            st.bar_chart(progress_df.set_index("Status"))
+    
+    # Recent activity feed
+    with st.expander("Recent Demo Activity", expanded=True):
+        activity_log = st.session_state.get("demo_activity_log", [])
+        if activity_log:
+            for activity in activity_log[-10:]:  # Show last 10 activities
+                timestamp = activity.get("timestamp", "")
+                message = activity.get("message", "")
+                activity_type = activity.get("type", "info")
+                
+                if activity_type == "alert_generated":
+                    st.markdown(f"""
+                    <div class='neo-activity-item alert'>
+                        🚨 <strong>{timestamp}</strong>: {message}
+                    </div>
+                    """, unsafe_allow_html=True)
+                elif activity_type == "auto_closed":
+                    st.markdown(f"""
+                    <div class='neo-activity-item success'>
+                        ✅ <strong>{timestamp}</strong>: {message}
+                    </div>
+                    """, unsafe_allow_html=True)
+                elif activity_type == "escalated":
+                    st.markdown(f"""
+                    <div class='neo-activity-item warning'>
+                        ⚠️ <strong>{timestamp}</strong>: {message}
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div class='neo-activity-item'>
+                        ℹ️ <strong>{timestamp}</strong>: {message}
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            st.info("Demo activity will appear here as alerts are generated and processed")
+
+
+def update_demo_metrics() -> None:
+    """Update demo session metrics from backend."""
+    current_session = st.session_state.get("current_demo_session")
+    if not current_session or current_session.get("status") != "active":
+        return
+    
+    try:
+        session_id = current_session["session_id"]
+        # Get updated metrics from demo controller
+        status = DEMO_CONTROLLER.get_session_status(session_id)
+        
+        if status.get("success"):
+            metrics = status.get("metrics", {})
+            current_session["metrics"] = metrics
+            st.session_state["current_demo_session"] = current_session
+            
+            # Add to activity log if new alerts
+            if metrics.get("alerts_generated", 0) > current_session.get("last_alert_count", 0):
+                activity_log = st.session_state.get("demo_activity_log", [])
+                activity_log.append({
+                    "timestamp": datetime.now().strftime("%H:%M:%S"),
+                    "message": f"New alert generated (Total: {metrics['alerts_generated']})",
+                    "type": "alert_generated"
+                })
+                st.session_state["demo_activity_log"] = activity_log
+                current_session["last_alert_count"] = metrics["alerts_generated"]
+        else:
+            # Fallback: simulate demo metrics for testing
+            simulate_demo_metrics_update(current_session)
+                
+    except Exception as e:
+        # Fallback: simulate demo metrics for testing
+        simulate_demo_metrics_update(current_session)
+
+
+def simulate_demo_metrics_update(current_session: Dict[str, Any]) -> None:
+    """Simulate demo metrics updates for testing when backend is unavailable."""
+    import random
+    
+    # Get session start time
+    started_at = current_session.get("started_at", datetime.now())
+    session_duration = (datetime.now() - started_at).total_seconds() / 60  # minutes
+    
+    # Simulate metrics based on session duration and configuration
+    config = current_session.get("config", {})
+    interval_seconds = config.get("interval_seconds", 30.0)
+    false_positive_rate = config.get("false_positive_rate", 0.8)
+    
+    # Calculate expected alerts based on time elapsed
+    expected_alerts = max(1, int(session_duration * 60 / interval_seconds))
+    
+    # Add some randomness
+    current_metrics = current_session.get("metrics", {})
+    current_alerts = current_metrics.get("alerts_generated", 0)
+    
+    # Gradually increase alerts
+    if current_alerts < expected_alerts:
+        new_alerts = min(expected_alerts, current_alerts + random.randint(0, 2))
+        processed_alerts = max(0, new_alerts - random.randint(0, 2))
+        auto_closed = int(processed_alerts * false_positive_rate)
+        escalated = processed_alerts - auto_closed
+        
+        updated_metrics = {
+            "alerts_generated": new_alerts,
+            "alerts_processed": processed_alerts,
+            "auto_closed_count": auto_closed,
+            "escalated_count": escalated,
+            "automation_rate": auto_closed / max(1, processed_alerts),
+            "avg_processing_time": random.uniform(2.0, 8.0),
+            "session_duration": session_duration
+        }
+        
+        current_session["metrics"] = updated_metrics
+        st.session_state["current_demo_session"] = current_session
+        
+        # Add activity log entries
+        if new_alerts > current_alerts:
+            activity_log = st.session_state.get("demo_activity_log", [])
+            activity_log.append({
+                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                "message": f"Simulated alert generated (Total: {new_alerts})",
+                "type": "alert_generated"
+            })
+            
+            # Add processing activities
+            if processed_alerts > current_metrics.get("alerts_processed", 0):
+                if auto_closed > current_metrics.get("auto_closed_count", 0):
+                    activity_log.append({
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                        "message": f"Alert auto-closed by AI analysis (False positive detected)",
+                        "type": "auto_closed"
+                    })
+                
+                if escalated > current_metrics.get("escalated_count", 0):
+                    activity_log.append({
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                        "message": f"Alert escalated to human analyst (Suspicious activity)",
+                        "type": "escalated"
+                    })
+            
+            st.session_state["demo_activity_log"] = activity_log[-20:]  # Keep last 20 entries
 
 
 def render_brand_header() -> None:
@@ -1031,6 +1643,19 @@ def extract_markdown_preview(path: Path) -> Dict[str, str]:
 
 
 def render_operations_view(items: List[Dict[str, Any]], mode: str) -> None:
+    # Demo controls section
+    with st.expander("🎯 Interactive Demo System", expanded=True):
+        render_demo_control_panel()
+        
+        # Show demo configuration if requested
+        if st.session_state.get("show_demo_config", False):
+            render_demo_scenario_selection()
+        
+        # Show progress tracking if demo is active
+        current_session = st.session_state.get("current_demo_session")
+        if current_session and current_session.get("status") in ["active", "paused"]:
+            render_demo_progress_tracking()
+    
     render_getting_started_cards()
     render_investigation_overview(items)
     render_connector_status()
@@ -1634,6 +2259,15 @@ def display_compliance():
 def main():
     apply_branding()
     render_brand_header()
+    
+    # Check if demo is active and update metrics
+    current_session = st.session_state.get("current_demo_session")
+    if current_session and current_session.get("status") == "active":
+        update_demo_metrics()
+        # Auto-refresh every 5 seconds when demo is active
+        if st_autorefresh:
+            st_autorefresh(interval=5000, key="demo-refresh-timer")
+    
     with st.sidebar:
         if LOGO_PATH.exists():
             st.image(str(LOGO_PATH), width=120)
@@ -1649,6 +2283,17 @@ def main():
             ],
         )
         st.caption("Switch between live investigations, agent telemetry, knowledge packs, and compliance automation.")
+        
+        # Demo status indicator in sidebar
+        if current_session:
+            status = current_session.get("status", "stopped")
+            if status == "active":
+                st.success("🟢 Demo Active")
+            elif status == "paused":
+                st.warning("🟡 Demo Paused")
+            else:
+                st.info("⚪ Demo Stopped")
+    
     mode, _ = select_ui_mode()
     if mode == "Live" and st_autorefresh is None:
         if st.button("Refresh now", key="manual-refresh"):

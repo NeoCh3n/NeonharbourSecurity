@@ -1,0 +1,375 @@
+{
+  "Findings": [
+    {
+      "Id": "arn:aws:securityhub:us-east-1:123456789012:finding/aws-foundational-security-standard/v/1.0.0/EC2.1/finding/12345678-1234-1234-1234-123456789012",
+      "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
+      "GeneratorId": "aws-foundational-security-standard/v/1.0.0/EC2.1",
+      "AwsAccountId": "123456789012",
+      "Region": "us-east-1",
+      "Partition": "aws",
+      "CreatedAt": "2024-01-15T10:30:00.000Z",
+      "UpdatedAt": "2024-01-15T14:45:00.000Z",
+      "FirstObservedAt": "2024-01-15T10:30:00.000Z",
+      "LastObservedAt": "2024-01-15T14:45:00.000Z",
+      "Severity": {
+        "Label": "HIGH",
+        "Normalized": 70,
+        "Original": "HIGH"
+      },
+      "Confidence": 85,
+      "Criticality": 75,
+      "Title": "EC2 instance should not have a public IP address",
+      "Description": "This control checks whether Amazon EC2 instances have a public IP address. The control fails if the publicIp field is present in the EC2 instance configuration item.",
+      "Types": [
+        "Sensitive Data Identifications/PII",
+        "Effects/Data Exposure/AWS EC2 Instance"
+      ],
+      "SourceUrl": "https://docs.aws.amazon.com/console/securityhub/EC2.1/remediation",
+      "Compliance": {
+        "Status": "FAILED",
+        "RelatedRequirements": [
+          "PCI DSS 1.2.1",
+          "PCI DSS 1.3.1",
+          "PCI DSS 1.3.2",
+          "PCI DSS 1.3.4",
+          "PCI DSS 1.3.6"
+        ],
+        "StatusReasons": [
+          {
+            "ReasonCode": "EC2_INSTANCE_HAS_PUBLIC_IP",
+            "Description": "The EC2 instance has a public IP address assigned"
+          }
+        ]
+      },
+      "Remediation": {
+        "Recommendation": {
+          "Text": "Remove the public IP address from the EC2 instance or move it to a private subnet",
+          "Url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-instance-addressing.html"
+        }
+      },
+      "WorkflowState": "NEW",
+      "Workflow": {
+        "Status": "NEW"
+      },
+      "RecordState": "ACTIVE",
+      "Resources": [
+        {
+          "Id": "arn:aws:ec2:us-east-1:123456789012:instance/i-1234567890abcdef0",
+          "Type": "AwsEc2Instance",
+          "Partition": "aws",
+          "Region": "us-east-1",
+          "Tags": {
+            "Environment": "production",
+            "Application": "web-server"
+          },
+          "Details": {
+            "AwsEc2Instance": {
+              "Type": "t3.medium",
+              "ImageId": "ami-0abcdef1234567890",
+              "VpcId": "vpc-12345678",
+              "SubnetId": "subnet-12345678",
+              "LaunchedAt": "2024-01-15T09:00:00.000Z"
+            }
+          }
+        }
+      ],
+      "Network": {
+        "Direction": "IN",
+        "Protocol": "TCP",
+        "SourceIpV4": "0.0.0.0/0",
+        "SourcePort": 80,
+        "DestinationPort": 80
+      }
+    },
+    {
+      "Id": "arn:aws:securityhub:us-east-1:123456789012:finding/guardduty/finding/87654321-4321-4321-4321-210987654321",
+      "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/guardduty",
+      "GeneratorId": "guardduty",
+      "AwsAccountId": "123456789012",
+      "Region": "us-east-1",
+      "Partition": "aws",
+      "CreatedAt": "2024-01-15T11:15:00.000Z",
+      "UpdatedAt": "2024-01-15T11:15:00.000Z",
+      "FirstObservedAt": "2024-01-15T11:10:00.000Z",
+      "LastObservedAt": "2024-01-15T11:15:00.000Z",
+      "Severity": {
+        "Label": "CRITICAL",
+        "Normalized": 90,
+        "Original": "8.5"
+      },
+      "Confidence": 95,
+      "Criticality": 90,
+      "Title": "Malware:EC2/SuspiciousFile detected on EC2 instance",
+      "Description": "A suspicious file was detected on EC2 instance i-0987654321fedcba0. This may indicate the presence of malware.",
+      "Types": [
+        "TTPs/Defense Evasion/Malware",
+        "Effects/Data Destruction"
+      ],
+      "SourceUrl": "https://console.aws.amazon.com/guardduty/",
+      "Compliance": {
+        "Status": "WARNING",
+        "RelatedRequirements": [
+          "NIST.800-53.r5 SI-3",
+          "NIST.800-53.r5 SI-4"
+        ]
+      },
+      "Remediation": {
+        "Recommendation": {
+          "Text": "Isolate the affected instance and perform malware analysis",
+          "Url": "https://docs.aws.amazon.com/guardduty/latest/ug/guardduty_remediate.html"
+        }
+      },
+      "WorkflowState": "NEW",
+      "Workflow": {
+        "Status": "NEW"
+      },
+      "RecordState": "ACTIVE",
+      "Resources": [
+        {
+          "Id": "arn:aws:ec2:us-east-1:123456789012:instance/i-0987654321fedcba0",
+          "Type": "AwsEc2Instance",
+          "Partition": "aws",
+          "Region": "us-east-1",
+          "Tags": {
+            "Environment": "production",
+            "Application": "database"
+          },
+          "Details": {
+            "AwsEc2Instance": {
+              "Type": "r5.large",
+              "ImageId": "ami-0fedcba0987654321",
+              "VpcId": "vpc-87654321",
+              "SubnetId": "subnet-87654321",
+              "LaunchedAt": "2024-01-10T14:30:00.000Z"
+            }
+          }
+        }
+      ],
+      "Malware": [
+        {
+          "Name": "Trojan.Generic.123456",
+          "Type": "TROJAN",
+          "Path": "/tmp/suspicious_file.sh",
+          "State": "OBSERVED"
+        }
+      ]
+    },
+    {
+      "Id": "arn:aws:securityhub:us-east-1:123456789012:finding/config/finding/config-rule-compliance-check",
+      "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/config",
+      "GeneratorId": "aws-config-rule/s3-bucket-public-access-prohibited",
+      "AwsAccountId": "123456789012",
+      "Region": "us-east-1",
+      "Partition": "aws",
+      "CreatedAt": "2024-01-15T08:00:00.000Z",
+      "UpdatedAt": "2024-01-15T12:00:00.000Z",
+      "FirstObservedAt": "2024-01-15T08:00:00.000Z",
+      "LastObservedAt": "2024-01-15T12:00:00.000Z",
+      "Severity": {
+        "Label": "MEDIUM",
+        "Normalized": 50,
+        "Original": "MEDIUM"
+      },
+      "Confidence": 90,
+      "Criticality": 60,
+      "Title": "S3 bucket should prohibit public access",
+      "Description": "This control checks whether your S3 buckets allow public access by evaluating the Block Public Access settings, the bucket policy, and the bucket access control list (ACL).",
+      "Types": [
+        "Sensitive Data Identifications",
+        "Effects/Data Exposure/AWS S3 Bucket"
+      ],
+      "SourceUrl": "https://docs.aws.amazon.com/config/latest/developerguide/s3-bucket-public-access-prohibited.html",
+      "Compliance": {
+        "Status": "FAILED",
+        "RelatedRequirements": [
+          "PCI DSS 1.2.1",
+          "PCI DSS 1.3.1",
+          "PCI DSS 7.1.1",
+          "NIST.800-53.r5 AC-4",
+          "NIST.800-53.r5 SC-7"
+        ],
+        "StatusReasons": [
+          {
+            "ReasonCode": "S3_BUCKET_ALLOWS_PUBLIC_ACCESS",
+            "Description": "The S3 bucket allows public read access"
+          }
+        ]
+      },
+      "Remediation": {
+        "Recommendation": {
+          "Text": "Enable S3 Block Public Access settings and review bucket policies",
+          "Url": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html"
+        }
+      },
+      "WorkflowState": "NEW",
+      "Workflow": {
+        "Status": "NEW"
+      },
+      "RecordState": "ACTIVE",
+      "Resources": [
+        {
+          "Id": "arn:aws:s3:::my-public-bucket",
+          "Type": "AwsS3Bucket",
+          "Partition": "aws",
+          "Region": "us-east-1",
+          "Tags": {
+            "Environment": "development",
+            "Purpose": "static-assets"
+          },
+          "Details": {
+            "AwsS3Bucket": {
+              "Name": "my-public-bucket",
+              "CreatedAt": "2024-01-01T00:00:00.000Z",
+              "BucketLifecycleConfiguration": {},
+              "PublicAccessBlockConfiguration": {
+                "BlockPublicAcls": false,
+                "BlockPublicPolicy": false,
+                "IgnorePublicAcls": false,
+                "RestrictPublicBuckets": false
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "Id": "arn:aws:securityhub:us-east-1:123456789012:finding/inspector/finding/vulnerability-assessment",
+      "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/inspector",
+      "GeneratorId": "inspector",
+      "AwsAccountId": "123456789012",
+      "Region": "us-east-1",
+      "Partition": "aws",
+      "CreatedAt": "2024-01-15T13:20:00.000Z",
+      "UpdatedAt": "2024-01-15T13:20:00.000Z",
+      "FirstObservedAt": "2024-01-15T13:20:00.000Z",
+      "LastObservedAt": "2024-01-15T13:20:00.000Z",
+      "Severity": {
+        "Label": "HIGH",
+        "Normalized": 80,
+        "Original": "HIGH"
+      },
+      "Confidence": 95,
+      "Criticality": 85,
+      "Title": "CVE-2023-12345 - Critical vulnerability in OpenSSL",
+      "Description": "A critical vulnerability was found in OpenSSL version 1.1.1k that could allow remote code execution.",
+      "Types": [
+        "Software and Configuration Checks/Vulnerabilities/CVE"
+      ],
+      "SourceUrl": "https://console.aws.amazon.com/inspector/",
+      "Compliance": {
+        "Status": "FAILED",
+        "RelatedRequirements": [
+          "NIST.800-53.r5 SI-2",
+          "NIST.800-53.r5 RA-5"
+        ]
+      },
+      "Remediation": {
+        "Recommendation": {
+          "Text": "Update OpenSSL to the latest patched version",
+          "Url": "https://www.openssl.org/news/secadv/20231024.txt"
+        }
+      },
+      "WorkflowState": "NEW",
+      "Workflow": {
+        "Status": "NEW"
+      },
+      "RecordState": "ACTIVE",
+      "Resources": [
+        {
+          "Id": "arn:aws:ec2:us-east-1:123456789012:instance/i-abcdef1234567890",
+          "Type": "AwsEc2Instance",
+          "Partition": "aws",
+          "Region": "us-east-1",
+          "Tags": {
+            "Environment": "production",
+            "Application": "api-server"
+          },
+          "Details": {
+            "AwsEc2Instance": {
+              "Type": "m5.xlarge",
+              "ImageId": "ami-1234567890abcdef",
+              "VpcId": "vpc-abcdef12",
+              "SubnetId": "subnet-abcdef12",
+              "LaunchedAt": "2024-01-05T10:00:00.000Z"
+            }
+          }
+        }
+      ],
+      "ThreatIntelIndicators": [
+        {
+          "Type": "CVE_ID",
+          "Value": "CVE-2023-12345",
+          "Category": "EXPLOIT_AVAILABLE",
+          "LastObservedAt": "2024-01-15T13:20:00.000Z",
+          "Source": "NVD",
+          "SourceUrl": "https://nvd.nist.gov/vuln/detail/CVE-2023-12345"
+        }
+      ]
+    },
+    {
+      "Id": "arn:aws:securityhub:us-east-1:123456789012:finding/macie/finding/sensitive-data-discovery",
+      "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/macie",
+      "GeneratorId": "macie",
+      "AwsAccountId": "123456789012",
+      "Region": "us-east-1",
+      "Partition": "aws",
+      "CreatedAt": "2024-01-15T15:30:00.000Z",
+      "UpdatedAt": "2024-01-15T15:30:00.000Z",
+      "FirstObservedAt": "2024-01-15T15:30:00.000Z",
+      "LastObservedAt": "2024-01-15T15:30:00.000Z",
+      "Severity": {
+        "Label": "MEDIUM",
+        "Normalized": 60,
+        "Original": "MEDIUM"
+      },
+      "Confidence": 88,
+      "Criticality": 70,
+      "Title": "Sensitive data discovered in S3 bucket",
+      "Description": "Amazon Macie discovered potential credit card numbers in S3 bucket customer-data-backup.",
+      "Types": [
+        "Sensitive Data Identifications/PII",
+        "Sensitive Data Identifications/Financial"
+      ],
+      "SourceUrl": "https://console.aws.amazon.com/macie/",
+      "Compliance": {
+        "Status": "WARNING",
+        "RelatedRequirements": [
+          "PCI DSS 3.2.1",
+          "PCI DSS 3.4.1",
+          "GDPR Article 32"
+        ]
+      },
+      "Remediation": {
+        "Recommendation": {
+          "Text": "Review and encrypt sensitive data, implement proper access controls",
+          "Url": "https://docs.aws.amazon.com/macie/latest/user/findings-remediate.html"
+        }
+      },
+      "WorkflowState": "NEW",
+      "Workflow": {
+        "Status": "NEW"
+      },
+      "RecordState": "ACTIVE",
+      "Resources": [
+        {
+          "Id": "arn:aws:s3:::customer-data-backup/sensitive-files/",
+          "Type": "AwsS3Object",
+          "Partition": "aws",
+          "Region": "us-east-1",
+          "Tags": {
+            "DataClassification": "confidential",
+            "Department": "finance"
+          },
+          "Details": {
+            "AwsS3Object": {
+              "Key": "sensitive-files/customer_records_2024.csv",
+              "ETag": "\"d41d8cd98f00b204e9800998ecf8427e\"",
+              "VersionId": "null",
+              "ServerSideEncryption": "AES256"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

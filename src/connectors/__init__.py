@@ -7,6 +7,7 @@ from .okta import OktaClient
 from .cloudtrail import CloudTrailClient
 from .vpcflow import VPCFlowLogsClient
 from .guardduty import GuardDutyClient
+from .securityhub import SecurityHubClient
 
 __all__ = [
     'SentinelClient',
@@ -18,4 +19,5 @@ __all__ = [
     'CloudTrailClient',
     'VPCFlowLogsClient',
     'GuardDutyClient',
+    'SecurityHubClient',
 ]

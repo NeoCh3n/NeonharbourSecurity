@@ -588,5 +588,158 @@ class DemoLiveIntegration:
         return recommendations
 
 
-# Global integration manager instance
+class DemoPipelineIntegration:
+    """
+    Simplified pipeline integration class for demo system testing.
+    Provides the interface expected by the test suite.
+    """
+    
+    def __init__(self):
+        self.demo_live_integration = DemoLiveIntegration()
+        self.generator = None  # Will be set by tests
+        self.events_client = boto3.client('events')
+        self.progress_tracker = None  # Will be set by tests
+        self.metrics_collector = None  # Will be set by tests
+    
+    def get_available_demo_scenarios(self) -> Dict[str, Any]:
+        """Get available demo scenarios."""
+        from .scenarios import get_scenario_templates
+        
+        templates = get_scenario_templates()
+        scenarios = {}
+        
+        for template in templates:
+            scenarios[template.scenario_type] = {
+                "attack_vector": template.attack_vector,
+                "source": template.source,
+                "severity": template.severity,
+                "tactics": template.tactics,
+                "hkma_relevance": template.hkma_relevance,
+                "description": template.description_template
+            }
+        
+        return scenarios
+    
+    def create_demo_preset_configurations(self) -> Dict[str, Any]:
+        """Create demo preset configurations."""
+        from .session import DEMO_PRESETS
+        
+        presets = {}
+        for preset_name, preset_params in DEMO_PRESETS.items():
+            presets[preset_name] = {
+                "name": preset_name.replace('_', ' ').title(),
+                "description": f"Demo preset for {preset_params.target_audience} audience",
+                "scenario_types": preset_params.scenario_types,
+                "target_audience": preset_params.target_audience,
+                "demo_parameters": {
+                    "interval_seconds": preset_params.interval_seconds,
+                    "false_positive_rate": preset_params.false_positive_rate,
+                    "complexity_level": preset_params.complexity_level
+                },
+                "duration_minutes": preset_params.duration_minutes
+            }
+        
+        return presets
+    
+    def validate_demo_configuration(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate demo configuration."""
+        from .scenarios import get_scenario_templates
+        
+        errors = []
+        
+        # Validate scenario types
+        if "scenario_types" in config:
+            available_scenarios = [t.scenario_type for t in get_scenario_templates()]
+            for scenario_type in config["scenario_types"]:
+                if scenario_type not in available_scenarios:
+                    errors.append(f"Invalid scenario type: {scenario_type}")
+        
+        # Validate interval
+        if "interval_seconds" in config:
+            if config["interval_seconds"] < 10.0:
+                errors.append("interval_seconds must be at least 10.0")
+        
+        # Validate false positive rate
+        if "false_positive_rate" in config:
+            if not (0.0 <= config["false_positive_rate"] <= 1.0):
+                errors.append("false_positive_rate must be between 0.0 and 1.0")
+        
+        # Validate duration
+        if "duration_minutes" in config:
+            if config["duration_minutes"] is not None and config["duration_minutes"] <= 0:
+                errors.append("duration_minutes must be positive")
+        
+        return {
+            "valid": len(errors) == 0,
+            "errors": errors
+        }
+    
+    def create_demo_investigation_event(self, alert) -> Dict[str, Any]:
+        """Create demo investigation event."""
+        return {
+            "Source": "asia.agentic.soc.demo",
+            "DetailType": "DemoAlert",
+            "EventBusName": "default",
+            "Detail": json.dumps({
+                "investigationId": alert.investigation_id,
+                "tenantId": alert.tenant_id,
+                "alert": {
+                    "alertId": alert.alert_id,
+                    "title": alert.title,
+                    "description": alert.description,
+                    "severity": alert.severity,
+                    "entities": alert.entities,
+                    "isDemo": True
+                },
+                "demoMetadata": {
+                    "scenarioType": alert.scenario_type,
+                    "isDemo": True,
+                    "isFalsePositive": alert.is_false_positive
+                }
+            })
+        }
+    
+    def get_demo_metrics_schema(self) -> Dict[str, Any]:
+        """Get demo metrics schema."""
+        return {
+            "session_metrics": {
+                "session_id": "string",
+                "start_time": "datetime",
+                "end_time": "datetime",
+                "total_alerts_generated": "integer",
+                "automation_rate": "float",
+                "escalation_rate": "float",
+                "avg_processing_time": "float"
+            },
+            "alert_metrics": {
+                "alert_id": "string",
+                "investigation_id": "string",
+                "scenario_type": "string",
+                "outcome": "string",
+                "confidence_score": "float",
+                "processing_time": "float",
+                "is_false_positive": "boolean"
+            },
+            "performance_metrics": {
+                "throughput": "float",
+                "latency": "float",
+                "error_rate": "float",
+                "resource_usage": "object"
+            }
+        }
+    
+    def send_demo_alert_to_pipeline(self, alert):
+        """Send demo alert to pipeline."""
+        event = self.create_demo_investigation_event(alert)
+        
+        response = self.events_client.put_events(
+            Entries=[event]
+        )
+        
+        if response.get('FailedEntryCount', 0) > 0:
+            raise Exception(f"Failed to send alert to pipeline: {response}")
+
+
+# Global integration manager instances
 demo_live_integration = DemoLiveIntegration()
+demo_pipeline_integration = DemoPipelineIntegration()

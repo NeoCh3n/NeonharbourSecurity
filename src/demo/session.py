@@ -54,6 +54,50 @@ class DemoParameters:
         if self.scenario_types is None:
             self.scenario_types = ["phishing", "malware", "insider_threat"]
     
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to regular dictionary"""
+        return {
+            'interval_seconds': self.interval_seconds,
+            'false_positive_rate': self.false_positive_rate,
+            'complexity_level': self.complexity_level,
+            'target_audience': self.target_audience,
+            'duration_minutes': self.duration_minutes,
+            'scenario_types': self.scenario_types
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'DemoParameters':
+        """Create from dictionary"""
+        return cls(
+            interval_seconds=data.get('interval_seconds', 30.0),
+            false_positive_rate=data.get('false_positive_rate', 0.8),
+            complexity_level=data.get('complexity_level', ComplexityLevel.INTERMEDIATE.value),
+            target_audience=data.get('target_audience', AudienceType.TECHNICAL.value),
+            duration_minutes=data.get('duration_minutes'),
+            scenario_types=data.get('scenario_types', ["phishing", "malware", "insider_threat"])
+        )
+    
+    def validate(self) -> Dict[str, Any]:
+        """Validate parameter values"""
+        errors = []
+        
+        if self.interval_seconds < 10.0:
+            errors.append("interval_seconds must be at least 10.0 seconds")
+        
+        if not (0.0 <= self.false_positive_rate <= 1.0):
+            errors.append("false_positive_rate must be between 0.0 and 1.0")
+        
+        if self.duration_minutes is not None and self.duration_minutes <= 0:
+            errors.append("duration_minutes must be positive")
+        
+        if not self.scenario_types or len(self.scenario_types) == 0:
+            errors.append("At least one scenario type must be specified")
+        
+        return {
+            'valid': len(errors) == 0,
+            'errors': errors
+        }
+    
     def to_dynamodb_dict(self):
         """Convert to DynamoDB-compatible dict with Decimal types"""
         return {
@@ -83,6 +127,31 @@ class DemoMetrics:
             self.automation_rate = self.auto_closed_count / self.alerts_processed
         else:
             self.automation_rate = 0.0
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to regular dictionary"""
+        return {
+            'alerts_generated': self.alerts_generated,
+            'alerts_processed': self.alerts_processed,
+            'auto_closed_count': self.auto_closed_count,
+            'escalated_count': self.escalated_count,
+            'automation_rate': self.automation_rate,
+            'avg_processing_time': self.avg_processing_time,
+            'session_duration': self.session_duration
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'DemoMetrics':
+        """Create from dictionary"""
+        return cls(
+            alerts_generated=data.get('alerts_generated', 0),
+            alerts_processed=data.get('alerts_processed', 0),
+            auto_closed_count=data.get('auto_closed_count', 0),
+            escalated_count=data.get('escalated_count', 0),
+            automation_rate=data.get('automation_rate', 0.0),
+            avg_processing_time=data.get('avg_processing_time', 0.0),
+            session_duration=data.get('session_duration', 0.0)
+        )
     
     def to_dynamodb_dict(self):
         """Convert to DynamoDB-compatible dict with Decimal types"""
@@ -421,5 +490,14 @@ DEMO_PRESETS = {
         target_audience=AudienceType.TECHNICAL.value,
         duration_minutes=None,  # Continuous
         scenario_types=["phishing", "malware", "network_anomaly", "insider_threat"]
+    ),
+    
+    "quick_demo": DemoParameters(
+        interval_seconds=20.0,
+        false_positive_rate=0.8,
+        complexity_level=ComplexityLevel.BASIC.value,
+        target_audience=AudienceType.TECHNICAL.value,
+        duration_minutes=10,
+        scenario_types=["phishing", "malware"]
     )
 }

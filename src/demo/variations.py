@@ -288,3 +288,55 @@ class AlertVariationEngine:
             "false_positive_strategies": sum(len(v) for v in self.false_positive_variations.values()),
             "genuine_threat_strategies": sum(len(v) for v in self.genuine_threat_variations.values())
         }
+
+
+def apply_hk_context(template: ScenarioTemplate) -> ScenarioTemplate:
+    """
+    Apply Hong Kong financial services context to a scenario template.
+    
+    Args:
+        template: The scenario template to enhance with HK context
+        
+    Returns:
+        Enhanced template with Hong Kong-specific context
+    """
+    enhanced_template = template
+    
+    # Add Hong Kong banking context to title
+    hk_context_phrases = [
+        "Hong Kong banking environment",
+        "HKMA regulated institution",
+        "Hong Kong financial services",
+        "Asia-Pacific banking operations",
+        "Hong Kong branch operations"
+    ]
+    
+    # Enhance description with HK context
+    if "hong kong" not in template.description_template.lower():
+        hk_phrase = random.choice(hk_context_phrases)
+        enhanced_template.description_template = (
+            f"{template.description_template} This incident occurred within a {hk_phrase} "
+            f"and requires assessment against HKMA supervisory requirements."
+        )
+    
+    # Add HK-specific entities if not present
+    hk_entities = [
+        {"type": "regulatory_framework", "name": "HKMA SA-2"},
+        {"type": "compliance_requirement", "name": "TM-G-1"},
+        {"type": "jurisdiction", "name": "Hong Kong SAR"},
+        {"type": "timezone", "name": "Asia/Hong_Kong"}
+    ]
+    
+    # Add one random HK entity
+    if not any("hk" in str(entity).lower() for entity in template.default_entities):
+        enhanced_template.default_entities.append(random.choice(hk_entities))
+    
+    # Enhance HKMA relevance if minimal
+    if len(template.hkma_relevance) < 50:
+        enhanced_template.hkma_relevance = (
+            f"{template.hkma_relevance} This scenario directly impacts compliance with "
+            f"Hong Kong Monetary Authority supervisory requirements for operational risk "
+            f"management and cybersecurity controls in licensed banking institutions."
+        )
+    
+    return enhanced_template

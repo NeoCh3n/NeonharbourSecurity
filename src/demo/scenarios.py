@@ -334,5 +334,194 @@ def get_scenario_templates() -> List[ScenarioTemplate]:
                 "Potential data harvesting pattern"
             ],
             hkma_relevance="PDPO compliance and SA-2 Section 6.1 - Data protection controls"
+        ),
+        
+        # Additional scenarios for better coverage
+        ScenarioTemplate(
+            scenario_type="malware_detection",
+            attack_vector="Malicious file execution",
+            source="defender",
+            severity="High",
+            tactics=["Execution", "DefenseEvasion"],
+            title_template="Malicious file detected on endpoint",
+            description_template="Windows Defender detected execution of suspicious file with "
+                               "malware characteristics. File exhibits behavior consistent with "
+                               "banking trojan targeting Hong Kong financial institutions.",
+            default_entities=[
+                {"type": "file", "name": "invoice_[number].pdf.exe"},
+                {"type": "host", "name": "HK-WS-[number]"},
+                {"type": "process", "name": "svchost.exe"},
+                {"type": "hash", "name": "sha256:[hash_value]"}
+            ],
+            false_positive_indicators=[
+                "Legitimate software installation",
+                "False positive detection signature",
+                "Authorized system utility",
+                "Development tool execution"
+            ],
+            genuine_threat_indicators=[
+                "Known malware signature match",
+                "Suspicious network communication",
+                "Registry modification attempts",
+                "Credential harvesting behavior"
+            ],
+            hkma_relevance="SA-2 Section 4.3 - Endpoint protection and malware detection"
+        ),
+        
+        ScenarioTemplate(
+            scenario_type="insider_threat_data_exfiltration",
+            attack_vector="Unauthorized data access and exfiltration",
+            source="sentinel",
+            severity="High",
+            tactics=["Collection", "Exfiltration"],
+            title_template="Suspicious data access pattern detected",
+            description_template="Employee accessed unusually large volumes of customer data "
+                               "outside normal business hours. Pattern suggests potential "
+                               "insider threat or compromised account activity.",
+            default_entities=[
+                {"type": "user", "name": "[employee_name]@neonharbour.hk"},
+                {"type": "database", "name": "CustomerData_Production"},
+                {"type": "records_accessed", "name": "15,000 customer records"},
+                {"type": "time", "name": "02:30 AM HKT"}
+            ],
+            false_positive_indicators=[
+                "Authorized data migration project",
+                "Scheduled batch processing job",
+                "Compliance audit data extraction",
+                "System maintenance activity"
+            ],
+            genuine_threat_indicators=[
+                "Access outside business hours",
+                "No corresponding work ticket",
+                "Unusual data volume accessed",
+                "External storage device usage"
+            ],
+            hkma_relevance="SA-2 Section 5.2 - Insider threat monitoring and data loss prevention"
+        ),
+        
+        ScenarioTemplate(
+            scenario_type="privilege_escalation_attack",
+            attack_vector="Unauthorized privilege elevation",
+            source="crowdstrike",
+            severity="High",
+            tactics=["PrivilegeEscalation", "Persistence"],
+            title_template="Privilege escalation attempt detected",
+            description_template="CrowdStrike detected attempts to escalate privileges using "
+                               "known vulnerability exploitation techniques. Activity suggests "
+                               "attempt to gain administrative access to critical systems.",
+            default_entities=[
+                {"type": "user", "name": "[target_user]"},
+                {"type": "vulnerability", "name": "CVE-2023-[number]"},
+                {"type": "process", "name": "powershell.exe"},
+                {"type": "target_system", "name": "HK-DC-[number]"}
+            ],
+            false_positive_indicators=[
+                "Authorized system administration",
+                "Legitimate software installation",
+                "Approved privilege delegation",
+                "System update process"
+            ],
+            genuine_threat_indicators=[
+                "Exploitation of known vulnerability",
+                "Unusual privilege request pattern",
+                "Lateral movement indicators",
+                "Persistence mechanism creation"
+            ],
+            hkma_relevance="SA-2 Section 4.2 - Access control and privilege management"
+        ),
+        
+        ScenarioTemplate(
+            scenario_type="data_breach_attempt",
+            attack_vector="Unauthorized access to sensitive data",
+            source="sentinel",
+            severity="Critical",
+            tactics=["Collection", "Exfiltration", "Impact"],
+            title_template="Potential data breach incident detected",
+            description_template="Multiple security controls triggered indicating potential "
+                               "data breach attempt. Unauthorized access to customer PII "
+                               "database with signs of data extraction activity.",
+            default_entities=[
+                {"type": "database", "name": "CustomerPII_Vault"},
+                {"type": "attacker_ip", "name": "[suspicious_ip]"},
+                {"type": "data_volume", "name": "50GB encrypted files"},
+                {"type": "encryption_key", "name": "AES-256 key rotation"}
+            ],
+            false_positive_indicators=[
+                "Authorized data backup process",
+                "Compliance data extraction",
+                "System migration activity",
+                "Disaster recovery testing"
+            ],
+            genuine_threat_indicators=[
+                "Unauthorized database access",
+                "Large volume data extraction",
+                "Encryption bypass attempts",
+                "External network communication"
+            ],
+            hkma_relevance="SA-2 Section 6.1 - Data protection and breach response procedures"
         )
     ]
+
+def validate_scenario_template(template: ScenarioTemplate) -> Dict[str, Any]:
+    """
+    Validate a scenario template for completeness and correctness.
+    
+    Args:
+        template: The scenario template to validate
+        
+    Returns:
+        Dict containing validation results with 'valid' boolean and 'errors' list
+    """
+    errors = []
+    
+    # Check required fields
+    required_fields = [
+        'scenario_type', 'attack_vector', 'source', 'severity',
+        'tactics', 'title_template', 'description_template', 'hkma_relevance'
+    ]
+    
+    for field in required_fields:
+        if not hasattr(template, field) or not getattr(template, field):
+            errors.append(f"Missing or empty required field: {field}")
+    
+    # Validate severity levels
+    valid_severities = ['Low', 'Medium', 'High', 'Critical']
+    if hasattr(template, 'severity') and template.severity not in valid_severities:
+        errors.append(f"Invalid severity level: {template.severity}. Must be one of {valid_severities}")
+    
+    # Validate tactics (basic MITRE ATT&CK validation)
+    valid_tactics = [
+        'InitialAccess', 'Execution', 'Persistence', 'PrivilegeEscalation',
+        'DefenseEvasion', 'CredentialAccess', 'Discovery', 'LateralMovement',
+        'Collection', 'CommandAndControl', 'Exfiltration', 'Impact', 'Reconnaissance'
+    ]
+    
+    if hasattr(template, 'tactics'):
+        for tactic in template.tactics:
+            if tactic not in valid_tactics:
+                errors.append(f"Invalid MITRE ATT&CK tactic: {tactic}")
+    
+    # Validate source systems
+    valid_sources = ['sentinel', 'splunk', 'defender', 'crowdstrike', 'guardduty', 'securityhub', 'entra', 'okta']
+    if hasattr(template, 'source') and template.source not in valid_sources:
+        errors.append(f"Invalid source system: {template.source}. Must be one of {valid_sources}")
+    
+    # Check for HKMA relevance
+    if hasattr(template, 'hkma_relevance'):
+        hkma_keywords = ['sa-2', 'tm-g-1', 'hkma', 'pdpo', 'operational risk', 'compliance']
+        hkma_text = template.hkma_relevance.lower()
+        if not any(keyword in hkma_text for keyword in hkma_keywords):
+            errors.append("HKMA relevance should reference SA-2, TM-G-1, PDPO, or other compliance frameworks")
+    
+    # Validate template placeholders (optional - templates can be static)
+    # This is just a warning, not an error
+    # if hasattr(template, 'title_template') and '[' not in template.title_template:
+    #     errors.append("Title template should contain placeholder variables in [brackets]")
+    
+    if hasattr(template, 'description_template') and len(template.description_template) < 50:
+        errors.append("Description template should be at least 50 characters long")
+    
+    return {
+        'valid': len(errors) == 0,
+        'errors': errors
+    }

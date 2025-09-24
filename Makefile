@@ -12,7 +12,7 @@ help:
 
 bootstrap:
 	$(PIP) install -r requirements.txt
-	$(PYTHON) src/knowledge/ingest.py --output out/knowledge_store.json
+	$(PYTHON) -m src.knowledge.ingest --output out/knowledge_store.json
 
 deploy:
 	$(SAM) build

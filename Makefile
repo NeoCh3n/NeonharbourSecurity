@@ -7,7 +7,7 @@ STREAMLIT ?= streamlit
 
 help:
 	@echo "Available targets: bootstrap deploy demo teardown fmt test lint compliance"
-	@echo "Additional: api metrics-demo"
+	@echo "Additional: api metrics-demo health diagnostics health-export"
 
 bootstrap:
 	$(PIP) install -r requirements.txt
@@ -42,3 +42,15 @@ api:
 
 metrics-demo:
 	$(PYTHON) tools/metrics/demo_metrics_collection.py
+
+health:
+	@echo "Running system health check..."
+	$(PYTHON) tools/health_check.py health
+
+diagnostics:
+	@echo "Running system diagnostics..."
+	$(PYTHON) tools/health_check.py diagnostics
+
+health-export:
+	@echo "Running health check and exporting results..."
+	$(PYTHON) tools/health_check.py both --export health_report_$(shell date +%Y%m%d_%H%M%S)

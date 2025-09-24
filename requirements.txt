@@ -9,3 +9,6 @@ pytest==8.1.1
 fpdf2==2.7.5
 pandas==2.2.1
 moto==5.0.0
+psutil==5.9.8
+flask==2.3.3
+flask-cors==4.0.0

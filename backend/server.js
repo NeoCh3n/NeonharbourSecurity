@@ -59,6 +59,163 @@ app.get('/healthz', (_req, res) => {
   res.json({ status: 'ok', region, timestamp: new Date().toISOString() });
 });
 
+// System Health Monitoring Endpoints
+app.get('/api/system/health', authenticateToken, requirePermission(PERMISSIONS.VIEW_SYSTEM_HEALTH), async (req, res) => {
+  try {
+    // Call Python health monitoring service
+    const { spawn } = require('child_process');
+    const pythonProcess = spawn('python', ['-c', `
+import sys
+import os
+sys.path.append('${process.cwd()}')
+from src.api.health import get_system_health
+import json
+try:
+    result = get_system_health()
+    print(json.dumps(result))
+except Exception as e:
+    print(json.dumps({"error": str(e)}))
+`]);
+
+    let output = '';
+    let error = '';
+
+    pythonProcess.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+      error += data.toString();
+    });
+
+    pythonProcess.on('close', (code) => {
+      if (code !== 0) {
+        logger.error({ error, code }, 'Python health check failed');
+        return res.status(500).json({ 
+          error: 'Health check failed',
+          details: error 
+        });
+      }
+
+      try {
+        const healthData = JSON.parse(output);
+        res.json(healthData);
+      } catch (parseError) {
+        logger.error({ parseError, output }, 'Failed to parse health check output');
+        res.status(500).json({ 
+          error: 'Failed to parse health check results',
+          output 
+        });
+      }
+    });
+
+  } catch (err) {
+    logger.error({ err }, 'failed to run health check');
+    res.status(500).json({ message: 'Failed to run health check' });
+  }
+});
+
+app.get('/api/system/health/quick', (_req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    version: process.env.APP_VERSION || '1.0.0',
+    region: region
+  });
+});
+
+app.get('/api/system/diagnostics', authenticateToken, requirePermission(PERMISSIONS.VIEW_SYSTEM_HEALTH), async (req, res) => {
+  try {
+    // Call Python diagnostics service
+    const { spawn } = require('child_process');
+    const pythonProcess = spawn('python', ['-c', `
+import sys
+import os
+sys.path.append('${process.cwd()}')
+from src.api.health import get_system_diagnostics
+import json
+try:
+    result = get_system_diagnostics()
+    print(json.dumps(result))
+except Exception as e:
+    print(json.dumps({"error": str(e)}))
+`]);
+
+    let output = '';
+    let error = '';
+
+    pythonProcess.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+      error += data.toString();
+    });
+
+    pythonProcess.on('close', (code) => {
+      if (code !== 0) {
+        logger.error({ error, code }, 'Python diagnostics failed');
+        return res.status(500).json({ 
+          error: 'Diagnostics failed',
+          details: error 
+        });
+      }
+
+      try {
+        const diagnosticsData = JSON.parse(output);
+        res.json(diagnosticsData);
+      } catch (parseError) {
+        logger.error({ parseError, output }, 'Failed to parse diagnostics output');
+        res.status(500).json({ 
+          error: 'Failed to parse diagnostics results',
+          output 
+        });
+      }
+    });
+
+  } catch (err) {
+    logger.error({ err }, 'failed to run diagnostics');
+    res.status(500).json({ message: 'Failed to run diagnostics' });
+  }
+});
+
+app.get('/api/system/metrics/performance', authenticateToken, requirePermission(PERMISSIONS.VIEW_SYSTEM_HEALTH), async (req, res) => {
+  try {
+    const performanceMetrics = {
+      timestamp: new Date().toISOString(),
+      metrics: {
+        cpu: {
+          percent: process.cpuUsage(),
+          load_average: require('os').loadavg()
+        },
+        memory: {
+          total: require('os').totalmem(),
+          free: require('os').freemem(),
+          used: require('os').totalmem() - require('os').freemem(),
+          percent: ((require('os').totalmem() - require('os').freemem()) / require('os').totalmem()) * 100,
+          process: process.memoryUsage()
+        },
+        uptime: {
+          system: require('os').uptime(),
+          process: process.uptime()
+        },
+        platform: {
+          type: require('os').type(),
+          platform: require('os').platform(),
+          arch: require('os').arch(),
+          release: require('os').release()
+        }
+      }
+    };
+    
+    res.json(performanceMetrics);
+  } catch (err) {
+    logger.error({ err }, 'failed to get performance metrics');
+    res.status(500).json({ message: 'Failed to get performance metrics' });
+  }
+});
+
 // User profile endpoint
 app.get('/auth/profile', authenticateToken, (req, res) => {
   res.json({

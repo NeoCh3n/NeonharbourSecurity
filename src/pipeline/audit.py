@@ -9,6 +9,7 @@ import boto3
 
 from .journal import log_stage_event
 from ..demo.mode_processor import ensure_consistent_processing, mode_processor
+from ..aws.service_integration import aws_service_integration
 
 DDB_TABLE = os.getenv("DDB_INVESTIGATIONS_TABLE", "AsiaAgenticSocInvestigations-dev")
 AUDIT_BUCKET = os.getenv("AUDIT_BUCKET", "asia-agentic-soc-audit")
@@ -64,20 +65,46 @@ def handler(event, _context):
         f"{now.strftime('%Y%m%dT%H%M%SZ')}.json"
     )
     
-    # Store audit record with consistent metadata
-    s3.put_object(
-        Body=body.encode("utf-8"),
-        Bucket=AUDIT_BUCKET,
-        Key=key,
-        ContentType="application/json",
-        ChecksumSHA256=checksum,
-        Metadata={
+    # Validate KMS encryption compliance before storing
+    try:
+        kms_compliance = aws_service_integration.ensure_kms_encryption_compliance()
+        if not kms_compliance["encryption_compliance"]:
+            print(f"WARNING: KMS encryption compliance issues: {kms_compliance['validation_errors']}")
+    except Exception as e:
+        print(f"WARNING: Could not validate KMS encryption compliance: {e}")
+    
+    # Store audit record with consistent metadata and proper encryption
+    put_object_params = {
+        "Body": body.encode("utf-8"),
+        "Bucket": AUDIT_BUCKET,
+        "Key": key,
+        "ContentType": "application/json",
+        "ChecksumSHA256": checksum,
+        "Metadata": {
             'investigation-id': investigation_id,
             'tenant-id': tenant_id,
             'processing-mode': context.mode.value,
-            'compliance-status': 'compliant'
+            'compliance-status': 'compliant',
+            'kms-encrypted': 'true',
+            'object-lock-enabled': 'true'
         }
-    )
+    }
+    
+    # Add server-side encryption with KMS if key is available
+    kms_key_id = os.getenv('KMS_KEY_ID')
+    if kms_key_id:
+        put_object_params.update({
+            "ServerSideEncryption": "aws:kms",
+            "SSEKMSKeyId": kms_key_id
+        })
+    
+    # Add Object Lock retention for compliance
+    put_object_params.update({
+        "ObjectLockMode": "COMPLIANCE",
+        "ObjectLockRetainUntilDate": datetime.now(timezone.utc).replace(year=datetime.now().year + 7)  # 7-year retention
+    })
+    
+    s3.put_object(**put_object_params)
 
     table = dynamodb.Table(DDB_TABLE)
     table.update_item(

@@ -20,6 +20,7 @@ from .mode_processor import ModeAwareProcessor, ProcessingMode, ProcessingContex
 from .mode_switcher import DemoLiveModeSwitcher, ModeSwitchResult
 from .quality_validator import DemoLiveQualityValidator, QualityMetrics
 from .workflow_validator import DemoLiveWorkflowValidator, WorkflowValidationResult
+from ..aws.service_integration import aws_service_integration
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,14 @@ class DemoLiveIntegration:
         by comparing recent investigations from both modes.
         """
         logger.info(f"Validating integration consistency for tenant {tenant_id}")
+        
+        # First validate AWS service integration
+        try:
+            aws_validation = aws_service_integration.validate_complete_integration()
+            if not aws_validation.all_services_healthy:
+                logger.warning(f"AWS service integration issues detected: {aws_validation.validation_errors}")
+        except Exception as e:
+            logger.error(f"Could not validate AWS service integration: {e}")
         
         try:
             # Get recent investigations from both modes

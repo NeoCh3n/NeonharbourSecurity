@@ -229,22 +229,35 @@ class DemoDataGenerator:
             "demoMetadata": {
                 "scenarioType": alert.scenario_type,
                 "isFalsePositive": alert.is_false_positive,
-                "riskLevel": alert.risk_level
+                "riskLevel": alert.risk_level,
+                "isDemo": True
             }
         }
         
         try:
+            # Ensure demo alerts route through complete Step Functions workflow
+            # by using the same EventBridge pattern as live alerts
             self.event_client.put_events(
                 Entries=[
                     {
                         "EventBusName": self.event_bus_name,
                         "Source": "asia.agentic.soc.demo",
-                        "DetailType": "DemoAlert",
+                        "DetailType": "AgenticAlert",  # Same as live alerts for consistent routing
                         "Detail": json.dumps(detail),
                     }
                 ]
             )
-            logger.info(f"Sent demo alert {alert.alert_id} to pipeline")
+            logger.info(f"Sent demo alert {alert.alert_id} to complete Step Functions pipeline")
+            
+            # Validate that alert will route through complete workflow
+            try:
+                from .workflow_validator import workflow_validator
+                routing_validation = workflow_validator.ensure_demo_workflow_routing(detail)
+                if not routing_validation["alert_valid"]:
+                    logger.warning(f"Demo alert routing issues: {routing_validation['routing_issues']}")
+            except ImportError:
+                pass  # Workflow validator not available
+                
         except ClientError as e:
             logger.error(f"Failed to send alert to EventBridge: {e}")
             raise

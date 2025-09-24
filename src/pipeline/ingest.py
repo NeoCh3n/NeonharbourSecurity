@@ -19,8 +19,13 @@ def handler(event, _context):
     investigation_id = detail.get("investigationId") or str(uuid.uuid4())
     tenant_id = detail.get("tenantId") or DEFAULT_TENANT
     received_at = detail.get("receivedAt") or datetime.now(timezone.utc).isoformat()
-    is_demo = detail.get("alert", {}).get("isDemo", False)
-
+    
+    # Extract demo metadata
+    alert = detail.get("alert", {})
+    is_demo = alert.get("isDemo", False)
+    demo_metadata = detail.get("demoMetadata", {})
+    
+    # Ensure consistent processing regardless of mode
     record = {
         "pk": f"TENANT#{tenant_id}",
         "sk": f"INVESTIGATION#{investigation_id}",
@@ -28,11 +33,16 @@ def handler(event, _context):
         "tenantId": tenant_id,
         "stage": "received",
         "status": "received",
-        "alert": detail.get("alert", {}),
+        "alert": alert,
         "receivedAt": received_at,
         "createdAt": received_at,
         "updatedAt": received_at,
+        "processingMode": "demo" if is_demo else "live",
     }
+    
+    # Add demo metadata if present (for metrics and validation)
+    if demo_metadata:
+        record["demoMetadata"] = demo_metadata
 
     table = dynamodb.Table(DDB_TABLE)
     table.put_item(Item=record)

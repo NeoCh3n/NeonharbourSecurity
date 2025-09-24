@@ -255,6 +255,7 @@ Resources:
       EventPattern:
         source:
           - asia.agentic.soc.ingestion
+          - asia.agentic.soc.demo
       Targets:
         - Arn: !GetAtt InvestigationStateMachine.Arn
           Id: AsiaAgenticSocStateMachine

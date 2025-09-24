@@ -8,6 +8,7 @@ STREAMLIT ?= streamlit
 help:
 	@echo "Available targets: bootstrap deploy demo teardown fmt test lint compliance"
 	@echo "Additional: api metrics-demo health diagnostics health-export"
+	@echo "Deployment: deploy-dev deploy-staging deploy-prod rollback status validate-config"
 
 bootstrap:
 	$(PIP) install -r requirements.txt
@@ -54,3 +55,34 @@ diagnostics:
 health-export:
 	@echo "Running health check and exporting results..."
 	$(PYTHON) tools/health_check.py both --export health_report_$(shell date +%Y%m%d_%H%M%S)
+
+# Deployment automation targets
+deploy-dev:
+	@echo "Deploying to development environment..."
+	./scripts/deploy.sh dev
+
+deploy-staging:
+	@echo "Deploying to staging environment..."
+	./scripts/deploy.sh staging
+
+deploy-prod:
+	@echo "Deploying to production environment..."
+	./scripts/deploy.sh prod
+
+rollback:
+	@echo "Usage: make rollback ENV=<env> TARGET=<version>"
+	@echo "Example: make rollback ENV=staging TARGET=v1.2.3"
+	@if [ -n "$(ENV)" ] && [ -n "$(TARGET)" ]; then \
+		./scripts/rollback.sh $(ENV) --target $(TARGET); \
+	fi
+
+status:
+	@echo "Checking deployment status..."
+	$(PYTHON) scripts/deployment/status.py
+
+validate-config:
+	@echo "Usage: make validate-config ENV=<env>"
+	@echo "Example: make validate-config ENV=dev"
+	@if [ -n "$(ENV)" ]; then \
+		$(PYTHON) scripts/deployment/validate_config.py $(ENV); \
+	fi

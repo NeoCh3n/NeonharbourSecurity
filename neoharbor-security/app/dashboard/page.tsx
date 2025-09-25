@@ -163,7 +163,7 @@ export default function DashboardPage() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <p className="text-muted-foreground">
-                        Prophet Security identified actions associate @fhlohegsescalation on the EC2 instance
+                        NeoHarborSecurity identified actions associate @fhlohegsescalation on the EC2 instance
                         i-008b13186bc8b2227
                       </p>
                       <p className="text-muted-foreground">- using the attached instance profile,</p>

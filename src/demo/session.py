@@ -14,13 +14,18 @@ from typing import Dict, List, Optional, Any
 from enum import Enum
 from decimal import Decimal
 
-import boto3
-from botocore.exceptions import (
-    ClientError,
-    EndpointConnectionError,
-    NoCredentialsError,
-    BotoCoreError,
-)
+# Optional AWS deps for offline demo mode
+try:  # pragma: no cover - exercised in integration tests
+    import boto3  # type: ignore
+    from botocore.exceptions import (  # type: ignore
+        ClientError,
+        EndpointConnectionError,
+        NoCredentialsError,
+        BotoCoreError,
+    )
+except Exception:  # Allow running without boto3
+    boto3 = None  # type: ignore
+    ClientError = EndpointConnectionError = NoCredentialsError = BotoCoreError = Exception  # type: ignore
 
 
 class SessionStatus(Enum):
@@ -223,8 +228,11 @@ class DemoSessionManager:
             self._activate_local_store("DEMO_DISABLE_DYNAMODB set")
             return
 
+        if boto3 is None:
+            self._activate_local_store("boto3 unavailable; using in-memory store")
+            return
         try:
-            self.dynamodb = boto3.resource("dynamodb", region_name=region)
+            self.dynamodb = boto3.resource("dynamodb", region_name=region)  # type: ignore[arg-type]
             self.table = self.dynamodb.Table(self.table_name)
         except (
             NoCredentialsError,

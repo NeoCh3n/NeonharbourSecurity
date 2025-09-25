@@ -26,7 +26,13 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.compliance.generate_pack import build_compliance_pack
 from src.demo.controller import DemoSessionController
-from src.demo.integration import DemoPipelineIntegration
+try:
+    # Optional: heavy dependency path that may require boto3
+    from src.demo.integration import DemoPipelineIntegration  # type: ignore
+    _integration_error: Optional[Exception] = None
+except Exception as _e:  # pragma: no cover - allow offline demo
+    DemoPipelineIntegration = None  # type: ignore
+    _integration_error = _e
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:4000")
 DEMO_TOKEN = os.getenv("DEMO_AUTH_TOKEN", "change-me")
@@ -40,7 +46,29 @@ LOGO_PATH = Path(__file__).resolve().parent / "assets" / "neo_logo.svg"
 
 # Demo system configuration
 DEMO_CONTROLLER = DemoSessionController()
-DEMO_INTEGRATION = DemoPipelineIntegration()
+if DemoPipelineIntegration is not None:
+    DEMO_INTEGRATION = DemoPipelineIntegration()
+else:
+    class _IntegrationStub:
+        def get_available_demo_scenarios(self):
+            try:
+                from src.demo.scenarios import get_scenario_templates  # type: ignore
+                templates = get_scenario_templates()
+                return {
+                    t.scenario_type: {
+                        "attack_vector": getattr(t, "attack_vector", "Unknown"),
+                        "source": getattr(t, "source", "Generic"),
+                        "severity": getattr(t, "severity", "Medium"),
+                    }
+                    for t in templates
+                }
+            except Exception:
+                return {
+                    "phishing_email": {"attack_vector": "Email", "source": "M365", "severity": "Medium"},
+                    "insider_data_exfiltration": {"attack_vector": "Cloud", "source": "S3", "severity": "High"},
+                }
+
+    DEMO_INTEGRATION = _IntegrationStub()
 
 st.set_page_config(page_title="NeoHarbourSecurity SOC Console", layout="wide")
 
@@ -100,15 +128,18 @@ PIPELINE_STEPS = [
 BRAND_CSS = """
 <style>
 :root {
-  --neo-bg-start: #0b1120;
+  --neo-bg-start: #0f172a;
   --neo-bg-end: #020617;
-  --neo-card: rgba(15, 23, 42, 0.82);
-  --neo-card-border: rgba(148, 163, 184, 0.18);
-  --neo-primary: #38bdf8;
-  --neo-secondary: #a855f7;
-  --neo-success: #4ade80;
-  --neo-text: #e2e8f0;
+  --neo-card: rgba(15, 23, 42, 0.9);
+  --neo-card-border: rgba(51, 65, 85, 0.45);
+  --neo-primary: #06b6d4;
+  --neo-secondary: #22d3ee;
+  --neo-success: #22c55e;
+  --neo-text: #f1f5f9;
   --neo-muted: #94a3b8;
+  --neo-high: #f87171;
+  --neo-medium: #facc15;
+  --neo-low: #34d399;
 }
 [data-testid="stAppViewContainer"] {
   background: radial-gradient(circle at 20% -10%, rgba(56, 189, 248, 0.18), transparent 40%),
@@ -195,11 +226,27 @@ BRAND_CSS = """
   color: var(--neo-muted);
 }
 .neo-demo-panel {
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.08), rgba(168, 85, 247, 0.06));
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.08), rgba(6, 182, 212, 0.06));
   border-radius: 16px;
   padding: 1.5rem;
-  border: 1px solid rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(6, 182, 212, 0.25);
   margin-bottom: 1rem;
+}
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -3rem;
+  background: rgba(15, 23, 42, 0.95);
+  color: var(--neo-text);
+  padding: 0.5rem 1rem;
+  border-radius: 0.75rem;
+  text-decoration: none;
+  transition: top 0.2s ease;
+  z-index: 1000;
+}
+.skip-link:focus {
+  top: 1rem;
+  outline: 3px solid var(--neo-primary);
 }
 .neo-demo-status {
   display: inline-flex;
@@ -246,6 +293,142 @@ BRAND_CSS = """
 .neo-activity-item.warning {
   background: rgba(251, 191, 36, 0.1);
   border-left: 3px solid #fbbf24;
+}
+.workspace-shell {
+  background: rgba(15, 23, 42, 0.82);
+  border-radius: 18px;
+  padding: 1.2rem;
+  border: 1px solid rgba(51, 65, 85, 0.5);
+  box-shadow: 0 24px 48px rgba(2, 6, 23, 0.55);
+}
+.workspace-section-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-bottom: 0.6rem;
+  color: var(--neo-text);
+}
+.workspace-planning [role="radiogroup"] label {
+  border-radius: 12px;
+  padding: 0.7rem 0.9rem;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  margin-bottom: 0.5rem;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.workspace-planning [role="radiogroup"] label:hover {
+  border-color: rgba(56, 189, 248, 0.45);
+}
+.workspace-planning [role="radiogroup"] label[data-checked="true"],
+.workspace-planning [role="radiogroup"] label[aria-checked="true"] {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.22), rgba(20, 244, 201, 0.1));
+  border-color: rgba(56, 189, 248, 0.55);
+}
+.workspace-action-card {
+  background: rgba(15, 23, 42, 0.68);
+  border-radius: 12px;
+  padding: 0.8rem;
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  margin-bottom: 0.5rem;
+  font-size: 0.87rem;
+  color: var(--neo-text);
+}
+.workspace-action-card strong {
+  display: block;
+  color: var(--neo-primary);
+}
+.workspace-panel {
+  background: rgba(15, 23, 42, 0.68);
+  border-radius: 16px;
+  padding: 1.1rem 1.3rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+.workspace-details h2 {
+  margin-bottom: 0.4rem;
+  color: var(--neo-text);
+}
+.workspace-details .subtitle {
+  color: var(--neo-muted);
+  margin-bottom: 1rem;
+}
+.workspace-fields .stExpander {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.64);
+  border-radius: 12px;
+}
+.workspace-alerts {
+  margin-top: 1.4rem;
+}
+.workspace-alert-card {
+  background: rgba(15, 23, 42, 0.72);
+  border-radius: 12px;
+  padding: 0.75rem 0.95rem;
+  border: 1px solid rgba(51, 65, 85, 0.45);
+  margin-bottom: 0.6rem;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.workspace-alert-card[data-severity="high"] {
+  border-left: 3px solid rgba(248, 113, 113, 0.65);
+}
+.workspace-alert-card[data-severity="medium"] {
+  border-left: 3px solid rgba(250, 204, 21, 0.65);
+}
+.workspace-alert-card[data-severity="low"] {
+  border-left: 3px solid rgba(52, 211, 153, 0.65);
+}
+.workspace-alert-card h4 {
+  margin: 0.35rem 0;
+  font-size: 0.92rem;
+  color: var(--neo-text);
+}
+.workspace-alert-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--neo-muted);
+}
+.workspace-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+.workspace-badge[data-variant="high"] {
+  background: rgba(248, 113, 113, 0.18);
+  color: rgba(248, 113, 113, 0.95);
+}
+.workspace-badge[data-variant="medium"] {
+  background: rgba(250, 204, 21, 0.18);
+  color: rgba(250, 204, 21, 0.95);
+}
+.workspace-badge[data-variant="low"] {
+  background: rgba(52, 211, 153, 0.18);
+  color: rgba(52, 211, 153, 0.95);
+}
+.workspace-feedback-panel {
+  margin-top: 1.4rem;
+  background: rgba(15, 23, 42, 0.8);
+  border-radius: 14px;
+  padding: 1rem 1.1rem;
+  border: 1px solid rgba(51, 65, 85, 0.45);
+}
+.workspace-feedback-panel label {
+  font-size: 0.8rem;
+  color: var(--neo-muted);
+  margin-bottom: 0.4rem;
+  display: block;
+}
+.workspace-feedback-success {
+  margin-top: 0.8rem;
+  background: rgba(34, 197, 94, 0.15);
+  border-left: 3px solid rgba(34, 197, 94, 0.6);
+  padding: 0.45rem 0.6rem;
+  border-radius: 10px;
+  color: rgba(34, 197, 94, 0.9);
+  font-size: 0.8rem;
 }
 </style>
 """
@@ -336,6 +519,62 @@ AGENT_ACTION_PRESETS = {
     "report": ["Seal audit log", "Emit metrics", "Generate compliance pack"],
 }
 
+WORKSPACE_QUESTIONS = [
+    "What was the latest alert activity associated with this EC2 instance?",
+    "Are there tickets related to the session activity?",
+    "Do any user session actions represent potential data theft?",
+    "Is there any internal investigation reference or previous false-positive tag?",
+    "How often does the EC2 workload trigger similar alerts across tenants?",
+    "Did AWS-AUTOMATION-ROLE assume privileged policies during the window?",
+    "What department or owner is accountable for this asset?",
+]
+
+WORKSPACE_ACTIONS = [
+    {
+        "title": "Address vulnerability CVE-2015-18935",
+        "body": "(CVSS 9.9, RCE) — update the workload to the patched build before resuming automation.",
+    },
+    {
+        "title": "Revoke active sessions",
+        "body": "Revoke sessions involving arn:aws:sts::819802345888:assumed-role/AWS-AUTOMATION-ROLE1.",
+    },
+]
+
+WORKSPACE_FIELDS = {
+    "Analyst": "NeoHarbor Security Copilot",
+    "Time": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+    "Last Updated": datetime.utcnow().strftime("%H:%M:%S UTC"),
+    "Determination": "Investigating",
+    "Severity": "High",
+}
+
+WORKSPACE_RECENT_ALERTS = [
+    {
+        "id": 1,
+        "title": "Suspicious privilege escalation by AWS-AUTOMATION",
+        "severity": "high",
+        "time": "2 hours ago",
+        "analyst": "Alex Chen",
+        "status": "investigating",
+    },
+    {
+        "id": 2,
+        "title": "Unusual API access pattern detected",
+        "severity": "medium",
+        "time": "4 hours ago",
+        "analyst": "Sarah Kim",
+        "status": "triaged",
+    },
+    {
+        "id": 3,
+        "title": "Failed authentication attempts from unknown IP",
+        "severity": "low",
+        "time": "6 hours ago",
+        "analyst": "Mike Johnson",
+        "status": "resolved",
+    },
+]
+
 COMPLIANCE_OVERVIEW = [
     {"title": "SA-2 controls mapped", "value": "18 / 18", "delta": "+2 updates"},
     {"title": "TM-G-1 safeguards", "value": "12 / 12", "delta": "Stable"},
@@ -403,111 +642,82 @@ def apply_branding() -> None:
 
 def render_demo_control_panel() -> None:
     """Render demo mode controls and status display."""
-    st.markdown("<div class='neo-demo-panel'>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='neo-demo-panel' role='region' aria-label='Interactive demo controls'>",
+        unsafe_allow_html=True,
+    )
     st.subheader("🎯 Interactive Demo Controls")
     st.caption(
-        "Configure and control continuous demo data generation with real-time metrics"
+        "Start, pause, or stop the synthetic alert stream used during the demo walkthrough."
     )
 
-    # Demo session status
     demo_session_key = "current_demo_session"
     current_session = st.session_state.get(demo_session_key)
+    session_status = (current_session or {}).get("status", "stopped")
 
     col1, col2, col3 = st.columns([2, 2, 1])
 
     with col1:
-        st.markdown("**Demo Status**")
-        if current_session and current_session.get("status") == "active":
-            st.markdown(
-                "<div class='neo-demo-status active'>🟢 Demo Active</div>",
-                unsafe_allow_html=True,
-            )
-            session_id = current_session.get("session_id", "unknown")[:8]
-            st.caption(f"Session: {session_id}...")
-        elif current_session and current_session.get("status") == "paused":
-            st.markdown(
-                "<div class='neo-demo-status paused'>🟡 Demo Paused</div>",
-                unsafe_allow_html=True,
-            )
+        st.markdown("**Session status**")
+        status_placeholder = st.empty()
+        if session_status == "active":
+            status_placeholder.success("Demo running — alerts refresh automatically.")
+            session_id = (current_session or {}).get("session_id", "")
+            if session_id:
+                st.caption(f"Session ID · {session_id[:8]}…")
+        elif session_status == "paused":
+            status_placeholder.warning("Demo paused — no new alerts until you resume.")
         else:
-            st.markdown(
-                "<div class='neo-demo-status stopped'>⚪ Demo Stopped</div>",
-                unsafe_allow_html=True,
-            )
+            status_placeholder.info("Demo idle — launch a session to populate metrics.")
 
     with col2:
-        st.markdown("**Real-time Metrics**")
-        if current_session:
-            metrics = current_session.get("metrics", {})
-            alerts_generated = metrics.get("alerts_generated", 0)
-            automation_rate = metrics.get("automation_rate", 0.0)
-
-            # Use custom metric cards
-            st.markdown(
-                f"""
-            <div class='neo-metric-card'>
-                <div style='font-size: 1.5rem; font-weight: bold; color: var(--neo-primary);'>{alerts_generated}</div>
-                <div style='font-size: 0.8rem; color: var(--neo-muted);'>Alerts Generated</div>
-            </div>
-            """,
-                unsafe_allow_html=True,
-            )
-
-            st.markdown(
-                f"""
-            <div class='neo-metric-card' style='margin-top: 0.5rem;'>
-                <div style='font-size: 1.5rem; font-weight: bold; color: var(--neo-success);'>{automation_rate:.1%}</div>
-                <div style='font-size: 0.8rem; color: var(--neo-muted);'>Automation Rate</div>
-            </div>
-            """,
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                """
-            <div class='neo-metric-card'>
-                <div style='font-size: 1.5rem; font-weight: bold; color: var(--neo-muted);'>0</div>
-                <div style='font-size: 0.8rem; color: var(--neo-muted);'>Alerts Generated</div>
-            </div>
-            """,
-                unsafe_allow_html=True,
-            )
-
-            st.markdown(
-                """
-            <div class='neo-metric-card' style='margin-top: 0.5rem;'>
-                <div style='font-size: 1.5rem; font-weight: bold; color: var(--neo-muted);'>0%</div>
-                <div style='font-size: 0.8rem; color: var(--neo-muted);'>Automation Rate</div>
-            </div>
-            """,
-                unsafe_allow_html=True,
-            )
+        st.markdown("**Live metrics**")
+        metrics = (current_session or {}).get("metrics", {})
+        st.metric(
+            label="Alerts generated",
+            value=int(metrics.get("alerts_generated", 0)),
+            help="Total synthetic alerts produced in this session",
+        )
+        automation_rate = metrics.get("automation_rate")
+        rate_display = f"{automation_rate:.0%}" if automation_rate is not None else "0%"
+        st.metric(
+            label="Automation rate",
+            value=rate_display,
+            help="Share of alerts auto-closed by the agentic workflow",
+        )
 
     with col3:
-        st.markdown("**Quick Actions**")
-        if current_session and current_session.get("status") == "active":
-            if st.button("⏸️ Pause", key="pause_demo", use_container_width=True):
+        st.markdown("**Quick actions**")
+        st.caption("Controls only affect the current demo session.")
+        if session_status == "active":
+            if st.button("⏸️ Pause Demo", key="pause_demo", use_container_width=True):
                 pause_demo_session()
             if st.button(
-                "⏹️ Stop", key="stop_demo", use_container_width=True, type="secondary"
+                "⏹️ Stop Demo",
+                key="stop_demo",
+                use_container_width=True,
+                type="secondary",
+                help="Stop the stream and clear in-flight automation cues",
             ):
                 stop_demo_session()
-        elif current_session and current_session.get("status") == "paused":
-            if st.button("▶️ Resume", key="resume_demo", use_container_width=True):
+        elif session_status == "paused":
+            if st.button("▶️ Resume Demo", key="resume_demo", use_container_width=True):
                 resume_demo_session()
             if st.button(
-                "⏹️ Stop",
+                "⏹️ Stop Demo",
                 key="stop_demo_paused",
                 use_container_width=True,
                 type="secondary",
+                help="End the paused session without resuming",
             ):
                 stop_demo_session()
         else:
             if st.button(
-                "🚀 Start Demo",
+                "🚀 Start Demo…",
                 key="start_demo",
                 use_container_width=True,
                 type="primary",
+                help="Open configuration to launch a synthetic data session",
             ):
                 show_demo_configuration()
 
@@ -541,30 +751,39 @@ def render_demo_scenario_selection() -> None:
         st.markdown("**Generation Parameters**")
 
         interval_seconds = st.slider(
-            "Alert Generation Interval (seconds)",
+            "Alert generation interval (seconds)",
             min_value=10.0,
             max_value=120.0,
             value=selected_preset["interval_seconds"],
             step=5.0,
-            help="Time between generated alerts",
+            help="Controls how frequently synthetic alerts are created during the demo",
         )
 
         false_positive_rate = st.slider(
-            "False Positive Rate",
+            "False-positive ratio",
             min_value=0.5,
             max_value=0.95,
             value=selected_preset["false_positive_rate"],
             step=0.05,
-            help="Percentage of alerts that should be false positives (to demonstrate automation)",
+            help="Higher values emphasise automation coverage; lower values surface escalations",
         )
 
-        duration_minutes = st.number_input(
-            "Demo Duration (minutes)",
-            min_value=1,
-            max_value=120,
-            value=selected_preset["duration_minutes"] or 15,
-            help="Leave empty for continuous generation",
+        continuous_run_default = selected_preset.get("duration_minutes") is None
+        run_continuously = st.checkbox(
+            "Run continuously",
+            value=continuous_run_default,
+            help="Leave enabled to keep the demo running until you stop it manually",
         )
+
+        duration_minutes: Optional[int] = None
+        if not run_continuously:
+            duration_minutes = st.number_input(
+                "Demo duration (minutes)",
+                min_value=1,
+                max_value=120,
+                value=selected_preset["duration_minutes"] or 15,
+                help="Choose how long the generator should run before stopping automatically",
+            )
 
     with col2:
         st.markdown("**Scenario Selection**")
@@ -574,7 +793,9 @@ def render_demo_scenario_selection() -> None:
             available_scenarios = DEMO_INTEGRATION.get_available_demo_scenarios()
             scenario_options = list(available_scenarios.keys())
         except Exception as e:
-            st.error(f"Failed to load scenarios: {e}")
+            st.error(
+                f"Unable to load the latest scenario catalogue — retry or use the preset defaults. Details: {e}"
+            )
             scenario_options = ["phishing_email", "malware_detection", "insider_threat"]
             available_scenarios = {}
 
@@ -633,7 +854,7 @@ def render_demo_scenario_selection() -> None:
         "scenario_types": selected_scenarios,
         "interval_seconds": interval_seconds,
         "false_positive_rate": false_positive_rate,
-        "duration_minutes": duration_minutes if duration_minutes > 0 else None,
+        "duration_minutes": duration_minutes if duration_minutes else None,
         "target_audience": target_audience,
     }
     st.session_state["demo_config"] = demo_config
@@ -676,11 +897,15 @@ def start_demo_session(config: Dict[str, Any]) -> None:
             st.experimental_rerun()
         else:
             st.error(
-                f"❌ Failed to start demo: {result.get('message', 'Unknown error')}"
+                "Something went wrong—check the configuration and try again. "
+                f"Details: {result.get('message', 'Unknown error')}"
             )
 
     except Exception as e:
-        st.error(f"❌ Error starting demo session: {str(e)}")
+        st.error(
+            "Something went wrong—try again or contact support with the error details. "
+            f"Details: {str(e)}"
+        )
 
 
 def pause_demo_session() -> None:
@@ -697,9 +922,15 @@ def pause_demo_session() -> None:
                 st.success("⏸️ Demo session paused")
                 st.experimental_rerun()
             else:
-                st.error(f"Failed to pause demo: {result.get('message')}")
+                st.error(
+                    "Pause unsuccessful—retry or stop the session. "
+                    f"Details: {result.get('message')}"
+                )
         except Exception as e:
-            st.error(f"Error pausing demo: {str(e)}")
+            st.error(
+                "Unable to pause the demo right now—try again in a moment. "
+                f"Details: {str(e)}"
+            )
 
 
 def resume_demo_session() -> None:
@@ -716,9 +947,15 @@ def resume_demo_session() -> None:
                 st.success("▶️ Demo session resumed")
                 st.experimental_rerun()
             else:
-                st.error(f"Failed to resume demo: {result.get('message')}")
+                st.error(
+                    "Resume unsuccessful—refresh the page or start a new session. "
+                    f"Details: {result.get('message')}"
+                )
         except Exception as e:
-            st.error(f"Error resuming demo: {str(e)}")
+            st.error(
+                "Unable to resume the demo—try again or start a new session. "
+                f"Details: {str(e)}"
+            )
 
 
 def stop_demo_session() -> None:
@@ -735,9 +972,15 @@ def stop_demo_session() -> None:
                 st.success("⏹️ Demo session stopped")
                 st.experimental_rerun()
             else:
-                st.error(f"Failed to stop demo: {result.get('message')}")
+                st.error(
+                    "Stop command did not complete—retry or refresh the page. "
+                    f"Details: {result.get('message')}"
+                )
         except Exception as e:
-            st.error(f"Error stopping demo: {str(e)}")
+            st.error(
+                "Unable to stop the demo session—refresh and try again. "
+                f"Details: {str(e)}"
+            )
 
 
 def render_demo_progress_tracking() -> None:
@@ -747,6 +990,9 @@ def render_demo_progress_tracking() -> None:
         return
 
     st.subheader("📊 Demo Progress Tracking")
+    st.caption(
+        "Metrics update automatically every few seconds while a demo session is active."
+    )
 
     # Import progress visualization
     try:
@@ -816,7 +1062,7 @@ def render_demo_progress_tracking() -> None:
             progress_visualization.render_demo_session_progress(session_id)
 
         # Recent activity feed
-        st.markdown("#### Recent Demo Activity")
+        st.markdown("#### Recent demo activity")
         activity_container = st.container()
         activity_log = st.session_state.get("demo_activity_log", [])
         if activity_log:
@@ -1013,6 +1259,564 @@ def render_brand_header() -> None:
             st.metric(label="Active tenants", value="12", delta="+3 in last 7d")
             st.metric(label="Agent coverage", value="92%", delta="+5%")
         st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ===== New Agentic Workflow Views (Getting Started → Plan → Investigate → Respond → Adapt) =====
+
+def _ensure_session_defaults() -> None:
+    st.session_state.setdefault("connected_sources", set())
+    st.session_state.setdefault("audit_log", [])
+    st.session_state.setdefault("current_investigation_id", "INV-DEMO-001")
+    st.session_state.setdefault("current_alert", {})
+    st.session_state.setdefault("current_plan_questions", [])
+    st.session_state.setdefault("selected_question_idx", 0)
+    st.session_state.setdefault("investigate_notes", [])
+    st.session_state.setdefault("workspace_selected_question", 0)
+    st.session_state.setdefault("workspace_feedback_success", False)
+
+
+def _load_workspace_alert() -> Dict[str, Any]:
+    alerts = _load_key_alerts()
+    return alerts[0] if alerts else {
+        "title": "Suspicious privilege escalation",
+        "entity": "i-008b13186bc8b2227",
+        "source": "AWS-AUTOMATION",
+        "severity": "High",
+        "timeline": [
+            ("09:00", "ConsoleLogin from automation role"),
+            ("09:04", "ListSecrets"),
+            ("09:06", "GetSecretValue"),
+            ("09:11", "Decrypt secret"),
+        ],
+    }
+
+
+def render_agentic_workspace() -> None:
+    _ensure_session_defaults()
+    alert = _load_workspace_alert()
+    selected = st.session_state.get("workspace_selected_question", 0)
+
+    st.markdown(
+        """
+    <div class='neo-hero'>
+        <h1>🛰 Agentic Investigation Workspace</h1>
+        <p>Plan, investigate, and respond within a single surface — mirroring the NeoHarbour Security analyst console.</p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div class='workspace-shell'>", unsafe_allow_html=True)
+    col_left, col_mid, col_right = st.columns([1.6, 2.6, 1.2])
+
+    with col_left:
+        st.markdown("<div class='workspace-section-title'>Planning</div>", unsafe_allow_html=True)
+        with st.container():
+            st.markdown("<div class='workspace-planning'>", unsafe_allow_html=True)
+            options = list(range(len(WORKSPACE_QUESTIONS)))
+            selected = st.radio(
+                "Planning questions",
+                options,
+                index=min(selected, len(options) - 1),
+                label_visibility="collapsed",
+                format_func=lambda idx: WORKSPACE_QUESTIONS[idx],
+                key="workspace_question_radio",
+            )
+            st.session_state["workspace_selected_question"] = selected
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown(
+            "<div class='workspace-section-title' style=\"margin-top:1.4rem;\">Respond</div>",
+            unsafe_allow_html=True,
+        )
+        for action in WORKSPACE_ACTIONS:
+            st.markdown(
+                f"""
+                <div class='workspace-action-card'>
+                    <strong>{action['title']}</strong>
+                    {action['body']}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("<div class='workspace-section-title' style=\"margin-top:1.4rem;\">Recent Alerts</div>", unsafe_allow_html=True)
+        st.markdown("<div class='workspace-alerts'>", unsafe_allow_html=True)
+        for info in WORKSPACE_RECENT_ALERTS:
+            severity = (info.get("severity") or "").lower() or "medium"
+            badge = severity.upper()
+            block = f"""
+                <div class='workspace-alert-card' data-severity='{severity}'>
+                    <div>
+                        <span class='workspace-badge' data-variant='{severity}'>{badge}</span>
+                    </div>
+                    <h4>{info.get('title')}</h4>
+                    <div class='workspace-alert-meta'>
+                        <span>🕒 {info.get('time')}</span>
+                        <span>👤 {info.get('analyst')}</span>
+                    </div>
+                </div>
+            """
+            st.markdown(block, unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with col_mid:
+        st.markdown("<div class='workspace-panel workspace-details'>", unsafe_allow_html=True)
+        severity = (alert.get("severity") or "High").lower()
+        st.markdown(
+            f"<span class='workspace-badge' data-variant='{severity}'>{severity.upper()}</span>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<h2>Suspicious privilege escalation by {alert.get('source', 'AWS-AUTOMATION')}</h2>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<div class='subtitle'>{alert.get('entity', 'Asset')} · Severity {alert.get('severity', 'High')}</div>",
+            unsafe_allow_html=True,
+        )
+        tabs = st.tabs(["Overview", "Intuitions", "Timeline"])
+        with tabs[0]:
+            st.markdown("**1 What happened during the user session?**")
+            st.write(
+                "NeoHarbor Security identified actions associated with automation role escalation on EC2 instance"
+                f" {alert.get('entity', 'i-008b13186bc8b2227')} using the attached instance profile."
+            )
+            st.markdown("**2 What access paths were exercised?**")
+            st.write(
+                "Session performed ListSecrets followed by GetSecretValue across two secret ARNs; flags potential data access."
+            )
+            chart_df = pd.DataFrame(
+                {
+                    "Action": ["ListSecrets", "GetSecretValue", "Decrypt"],
+                    "Count": [42, 19, 8],
+                }
+            )
+            st.bar_chart(chart_df.set_index("Action"), use_container_width=True)
+        with tabs[1]:
+            st.markdown("- Automation pattern matches prior drill — likely scripted privilege escalation.")
+            st.markdown("- No ticket linkage detected; cross-check ServiceNow for asset ownership confirmation.")
+            st.markdown("- Session originated from automation subnet; monitor for lateral movement.")
+        with tabs[2]:
+            timeline = alert.get("timeline") or [
+                ("09:00", "ConsoleLogin"),
+                ("09:04", "ListSecrets"),
+                ("09:06", "GetSecretValue"),
+                ("09:11", "Decrypt"),
+            ]
+            tdf = pd.DataFrame(timeline, columns=["Time", "Event"])
+            st.table(tdf)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with col_right:
+        st.markdown("<div class='workspace-panel workspace-fields'>", unsafe_allow_html=True)
+        st.markdown("<div class='workspace-section-title'>Fields</div>", unsafe_allow_html=True)
+        for key, value in WORKSPACE_FIELDS.items():
+            st.text_input(key, value=value, disabled=True)
+        with st.expander("Impacted Entities", expanded=True):
+            st.markdown("- EC2 instance i-008b13186bc8b2227")
+            st.markdown("- IAM role AWS-AUTOMATION-ROLE1")
+        with st.expander("IOCs", expanded=False):
+            st.markdown("- arn:aws:secretsmanager:ap-east-1:123456789012:secret/demo")
+            st.markdown("- 203.0.113.42 (automation subnet IP)")
+        with st.expander("Audit Log", expanded=True):
+            log = st.session_state.get("audit_log", [])
+            if log:
+                for ev in log:
+                    st.caption(f"{ev.get('time')} · {ev.get('event')}")
+            else:
+                st.caption("No audit entries yet in this session.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("<div class='workspace-feedback-panel'>", unsafe_allow_html=True)
+        st.markdown("<div class='workspace-section-title'>Feedback</div>", unsafe_allow_html=True)
+        with st.form("workspace_feedback_form", clear_on_submit=True):
+            rating = st.radio(
+                "Rate this investigation",
+                ("👍 Positive", "👎 Negative"),
+                horizontal=True,
+                key="workspace_feedback_rating",
+            )
+            comment = st.text_area(
+                "Share your thoughts…",
+                key="workspace_feedback_comment",
+                placeholder="Highlight what helped or what could improve",
+            )
+            submitted = st.form_submit_button("Send Feedback")
+
+        if submitted:
+            if comment.strip():
+                st.session_state["workspace_feedback_success"] = True
+                _append_audit(
+                    {
+                        "event": "workspace_feedback_submitted",
+                        "rating": "positive" if "👍" in rating else "negative",
+                        "notes": comment.strip(),
+                    }
+                )
+            else:
+                st.session_state["workspace_feedback_success"] = False
+                st.warning("Add a quick note before sending feedback.")
+        if st.session_state.get("workspace_feedback_success"):
+            st.markdown(
+                "<div class='workspace-feedback-success'>Feedback recorded for analyst tuning.</div>",
+                unsafe_allow_html=True,
+            )
+            st.session_state["workspace_feedback_success"] = False
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _append_audit(event: Dict[str, Any]) -> None:
+    event = dict(event)
+    event.setdefault("time", datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"))
+    log = st.session_state.get("audit_log", [])
+    log.append(event)
+    st.session_state["audit_log"] = log[-50:]
+
+
+def render_getting_started_view() -> None:
+    _ensure_session_defaults()
+    st.markdown(
+        """
+    <div class='neo-hero'>
+        <h1>🧭 Getting Started (POV)</h1>
+        <p>Create an account, connect 2–3 read‑only sources, then preview results instantly.</p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    # Account creation (stub for demo)
+    with st.expander("Account Setup", expanded=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            email = st.text_input("Work email", placeholder="analyst@bank.hk")
+            tenant = st.text_input("Tenant ID", value=os.getenv("DEFAULT_TENANT_ID", "hk-demo"))
+        with col2:
+            st.selectbox("Role", ["Admin", "Analyst", "Read-only"], index=1)
+            st.toggle("Enable SSO (preview)", value=False, disabled=True)
+        if st.button("Create Tenant", type="primary"):
+            _append_audit({"event": "tenant_created", "email": email, "tenant": tenant})
+            st.success("Tenant created (demo)")
+
+    # Data source connections
+    st.subheader("Connect data sources (read‑only)")
+    st.caption("Choose at least two. Adapters use rate‑limits and least‑privilege keys.")
+    cols = st.columns(3)
+    source_defs = [
+        ("AWS CloudTrail", "cloudtrail"),
+        ("Amazon GuardDuty", "guardduty"),
+        ("Wiz", "wiz"),
+        ("Microsoft Sentinel", "sentinel"),
+        ("Splunk", "splunk"),
+        ("Okta", "okta"),
+    ]
+    connected: set[str] = set(st.session_state.get("connected_sources") or set())
+    for i, (label, key) in enumerate(source_defs):
+        with cols[i % 3]:
+            on = st.checkbox(f"{label}", value=key in connected, key=f"src_{key}")
+            if on:
+                connected.add(key)
+            else:
+                connected.discard(key)
+    st.session_state["connected_sources"] = connected
+    readonly = st.toggle("Restricted to read‑only permissions", value=True)
+
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        if st.button("Connect & Validate", type="primary"):
+            if len(connected) < 2:
+                st.error("Select at least two sources.")
+            else:
+                _append_audit({
+                    "event": "sources_connected",
+                    "sources": sorted(connected),
+                    "readonly": readonly,
+                })
+                st.success("Connections validated (demo)")
+                st.session_state["nav_override"] = "Plan"
+    with c2:
+        st.button("Preview Results", help="Jump to analysis panel", on_click=lambda: st.session_state.__setitem__("nav_override", "Plan"))
+
+
+def _load_key_alerts() -> List[Dict[str, Any]]:
+    # Prefer seeded alerts if available
+    sent = load_seed("sentinel_alerts.json") or []
+    spl = load_seed("splunk_events.json") or []
+    def _as_alerts(items: Any) -> List[Dict[str, Any]]:
+        if isinstance(items, list):
+            return [i for i in items if isinstance(i, dict)]
+        if isinstance(items, dict) and "items" in items:
+            return [i for i in items.get("items", []) if isinstance(i, dict)]
+        return []
+    alerts = _as_alerts(sent)[:5] + _as_alerts(spl)[:5]
+    if not alerts:
+        # Minimal fallback
+        alerts = [
+            {"id": "ALERT-1", "title": "Suspicious privilege escalation", "severity": "High", "entity": "i-00ab1234"},
+            {"id": "ALERT-2", "title": "Multiple failed sign-ins", "severity": "Medium", "entity": "user@example.com"},
+        ]
+    return alerts[:8]
+
+
+def _generate_plan_questions(alert: Dict[str, Any]) -> List[str]:
+    ent = alert.get("entity") or alert.get("resourceId") or "the entity"
+    return [
+        f"What was the latest alert activity associated with {ent}?",
+        "Are there tickets related to the session activity?",
+        "Do any user session actions represent potential data theft?",
+        "Is there any internal investigation reference or previous false‑positive tag?",
+        "How often does the workload trigger similar alerts across tenants?",
+        "Did a privileged role get assumed during the window?",
+        "Which department or owner is accountable for the asset?",
+    ]
+
+
+def _question_list_ui(questions: List[str]) -> int:
+    st.markdown("### Planning")
+    selected = st.session_state.get("selected_question_idx", 0)
+    for i, q in enumerate(questions):
+        label = "✅ " + q if i == selected else q
+        if st.button(label, key=f"q{i}", use_container_width=True):
+            selected = i
+    st.session_state["selected_question_idx"] = selected
+    return selected
+
+
+def _right_side_panel(detail: Dict[str, Any]) -> None:
+    with st.container():
+        st.markdown("**Fields**")
+        cols = st.columns(2)
+        cols[0].text_input("Analyst", value="AI Analyst", disabled=True)
+        cols[1].text_input("Severity", value=detail.get("severity", "High"), disabled=True)
+        st.text_input("Determination", value=detail.get("determination", "Triage"), disabled=True)
+        st.text_input("Last Updated", value=datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"), disabled=True)
+        with st.expander("Impacted Entities", expanded=True):
+            items = detail.get("entities") or [detail.get("entity")] or []
+            for it in filter(None, items):
+                st.markdown(f"- {it}")
+        with st.expander("IOCs", expanded=False):
+            for ioc in detail.get("iocs", []):
+                st.markdown(f"- {ioc}")
+        with st.expander("Audit Log", expanded=True):
+            for ev in st.session_state.get("audit_log", []):
+                st.caption(f"{ev.get('time')} · {ev.get('event')}")
+
+
+def render_plan_view() -> None:
+    _ensure_session_defaults()
+    st.markdown(
+        """
+    <div class='neo-hero'>
+        <h1>🧩 Plan</h1>
+        <p>Auto‑extract key alerts and generate an analyst‑style question chain with risk‑aware ordering.</p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    alerts = _load_key_alerts()
+    st.markdown("#### Key Alerts")
+    sel = st.selectbox(
+        "Choose an alert to plan investigation",
+        options=list(range(len(alerts))),
+        format_func=lambda i: f"{alerts[i].get('title') or alerts[i].get('name')} · Sev: {alerts[i].get('severity','-')}",
+    )
+    current_alert = alerts[sel]
+    st.session_state["current_alert"] = current_alert
+    questions = _generate_plan_questions(current_alert)
+    st.session_state["current_plan_questions"] = questions
+
+    col_left, col_mid, col_right = st.columns([1.6, 2.6, 1.2])
+    with col_left:
+        idx = _question_list_ui(questions)
+        if st.button("Start Investigate", type="primary", use_container_width=True):
+            _append_audit({"event": "investigate_started", "alert": current_alert.get("title")})
+            st.session_state["nav_override"] = "Investigate"
+    with col_mid:
+        st.markdown("### Overview")
+        st.markdown(f"1. {questions[0]}")
+        st.markdown("2. What actions did the user perform during the session?")
+        st.markdown("3. Do any actions indicate data exfiltration risk?")
+        st.info("Select a question on the left to dive in.")
+    with col_right:
+        _right_side_panel({
+            "severity": current_alert.get("severity", "High"),
+            "entity": current_alert.get("entity"),
+            "iocs": [current_alert.get("ip"), current_alert.get("hash")],
+        })
+
+
+def _build_demo_graphs() -> None:
+    st.markdown("#### Session action frequency")
+    df = pd.DataFrame({"Action": ["ListSecrets", "GetSecretValue", "Decrypt"], "Count": [42, 17, 8]})
+    st.bar_chart(df.set_index("Action"), use_container_width=True)
+    st.markdown("#### Timeline")
+    tdf = pd.DataFrame(
+        [
+            {"t": "00:00", "event": "ConsoleLogin"},
+            {"t": "00:05", "event": "ListSecrets"},
+            {"t": "00:07", "event": "GetSecretValue"},
+            {"t": "00:12", "event": "Decrypt"},
+        ]
+    )
+    st.dataframe(tdf, hide_index=True, use_container_width=True)
+
+
+def render_investigate_view() -> None:
+    _ensure_session_defaults()
+    alert = st.session_state.get("current_alert", {})
+    questions = st.session_state.get("current_plan_questions") or _generate_plan_questions(alert or {})
+    selected_idx = st.session_state.get("selected_question_idx", 0)
+
+    st.markdown(
+        f"""
+    <div class='neo-hero'>
+        <h1>🔎 Investigate</h1>
+        <p>Aggregated context from connected sources with charts, timeline and dig‑deeper queries.</p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    col_left, col_mid, col_right = st.columns([1.6, 2.6, 1.2])
+    with col_left:
+        _question_list_ui(questions)
+        st.markdown("---")
+        if st.button("Mark as Potential Data Theft", use_container_width=True):
+            _append_audit({"event": "flagged_data_theft", "question": questions[selected_idx]})
+        if st.button("Proceed to Respond", type="primary", use_container_width=True):
+            st.session_state["nav_override"] = "Respond"
+
+    with col_mid:
+        tabs = st.tabs(["Overview", "Intuitions", "Timeline"])
+        with tabs[0]:
+            st.markdown(f"**Question:** {questions[selected_idx]}")
+            _build_demo_graphs()
+            note = st.text_input("Dig Deeper: ask a follow‑up")
+            if st.button("Run Query") and note:
+                notes = st.session_state.get("investigate_notes", [])
+                notes.append(note)
+                st.session_state["investigate_notes"] = notes[-10:]
+                _append_audit({"event": "dig_deeper", "query": note})
+            if st.session_state.get("investigate_notes"):
+                st.markdown("**Your follow‑ups:**")
+                for n in st.session_state["investigate_notes"]:
+                    st.caption("• " + n)
+        with tabs[1]:
+            st.markdown("- Elevated session rights observed early in the timeline")
+            st.markdown("- Sequence of ListSecrets → GetSecretValue could indicate exploration")
+            st.markdown("- No data egress beyond VPC detected in the window")
+        with tabs[2]:
+            _build_demo_graphs()
+
+    with col_right:
+        _right_side_panel({
+            "severity": alert.get("severity", "High"),
+            "entity": alert.get("entity"),
+            "iocs": [alert.get("ip"), alert.get("hash")],
+        })
+
+
+def _suggest_remediation() -> List[Dict[str, str]]:
+    return [
+        {"id": "DISABLE_KEYS", "label": "Disable access keys for suspicious principal"},
+        {"id": "ISOLATE_EC2", "label": "Isolate EC2 instance from network"},
+        {"id": "BLOCK_IP_WAF", "label": "Block malicious IP in WAF"},
+        {"id": "TICKET_UPSERT", "label": "Create/Update Jira or ServiceNow ticket"},
+    ]
+
+
+def render_respond_view() -> None:
+    _ensure_session_defaults()
+    st.markdown(
+        """
+    <div class='neo-hero'>
+        <h1>🛠 Respond</h1>
+        <p>Auto‑suggested, guard‑railed actions with HITL approval and full audit logging.</p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    col_left, col_mid, col_right = st.columns([1.6, 2.6, 1.2])
+    actions = _suggest_remediation()
+    with col_left:
+        st.markdown("### Actions")
+        exec_sel = []
+        for a in actions:
+            if st.checkbox(a["label"], key=f"act_{a['id']}"):
+                exec_sel.append(a)
+        if st.button("Execute with Approval", type="primary", use_container_width=True):
+            for a in exec_sel:
+                _append_audit({"event": "action_queued", "action": a["id"], "status": "approval_requested"})
+            if not exec_sel:
+                st.info("No actions selected.")
+            else:
+                st.success("Actions queued for approval (demo)")
+        st.markdown("---")
+        if st.button("Deduplicate Alerts", use_container_width=True):
+            _append_audit({"event": "dedup_run", "result": "merged 3 duplicates"})
+            st.success("Merged duplicate alerts (demo)")
+        if st.button("Create Ticket", use_container_width=True):
+            _append_audit({"event": "ticket_upserted", "system": "Jira", "id": "SEC-1024"})
+            st.success("Ticket created SEC-1024 (demo)")
+
+    with col_mid:
+        st.markdown("### Impact & Rationale")
+        st.write("- MTTA −42%, MTTI −63%, MTTR −37% vs baseline")
+        st.write("- False Positive Rate trending to 0.82 with automation")
+        st.write("- Actions limited to allow‑list; others require Phase B governance")
+
+    with col_right:
+        _right_side_panel({"severity": "High", "entities": ["i-00ab1234", "user@example.com"]})
+        if st.button("Proceed to Adapt", type="primary"):
+            st.session_state["nav_override"] = "Adapt"
+
+
+def render_adapt_view() -> None:
+    _ensure_session_defaults()
+    st.markdown(
+        """
+    <div class='neo-hero'>
+        <h1>♻️ Adapt</h1>
+        <p>Capture analyst feedback; store adaptation hints per tenant for precision tuning.</p>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+    col_left, col_mid, col_right = st.columns([1.6, 2.6, 1.2])
+    with col_left:
+        verdict = st.radio("Determination", ["Benign", "Malicious"], index=0)
+        notes = st.text_area("Notes", placeholder="Explain misclassification or add context…")
+        if st.button("Submit Feedback", type="primary", use_container_width=True):
+            fb = {"verdict": verdict.lower(), "notes": notes}
+            _append_audit({"event": "feedback_recorded", **fb})
+            try:
+                # Lightweight provider metadata without network calls
+                from src.ai.analyst import BedrockAnalyst
+
+                provider_meta = BedrockAnalyst().record_feedback(
+                    investigation_id=st.session_state.get("current_investigation_id"),
+                    tenant_id=os.getenv("DEFAULT_TENANT_ID", "hk-demo"),
+                    feedback={"risk": {"level": verdict.lower()}, "recommended_actions": []},
+                )
+            except Exception:
+                provider_meta = {"provider": "bedrock", "model": "n/a"}
+            st.session_state["adaptation_result"] = provider_meta
+            st.success("Feedback saved")
+
+    with col_mid:
+        st.markdown("### Learning Outcome")
+        res = st.session_state.get("adaptation_result") or {}
+        st.json({"recorded": True, "provider": res.get("provider"), "model": res.get("model")})
+
+    with col_right:
+        _right_side_panel({"severity": "—"})
 
 
 def render_getting_started_cards() -> None:
@@ -2636,13 +3440,13 @@ def render_realtime_progress_view(mode: str) -> None:
 
 def main():
     apply_branding()
-    render_brand_header()
-
-    # Check if demo is active and update metrics
+    st.markdown(
+        "<a class='skip-link' href='#main-content'>Skip to main content</a>",
+        unsafe_allow_html=True,
+    )
     current_session = st.session_state.get("current_demo_session")
     if current_session and current_session.get("status") == "active":
         update_demo_metrics()
-        # Auto-refresh every 5 seconds when demo is active
         if st_autorefresh:
             st_autorefresh(interval=5000, key="demo-refresh-timer")
 
@@ -2651,18 +3455,18 @@ def main():
             st.image(str(LOGO_PATH), width=120)
         st.markdown("**NeoHarbourSecurity**")
         nav = st.radio(
-            "Console views",
+            "Agentic Workflow",
             options=[
-                "Operations Console",
-                "Investigations",
-                "Real-time Progress",
-                "Agents Copilot",
-                "Knowledge Hub",
-                "Compliance",
+                "Agentic Workspace",
+                "Getting Started",
+                "Plan",
+                "Investigate",
+                "Respond",
+                "Adapt",
             ],
         )
         st.caption(
-            "Switch between live investigations, agent telemetry, knowledge packs, and compliance automation."
+            "Navigate the POV flow: connect → plan → investigate → respond → adapt."
         )
 
         # Demo status indicator in sidebar
@@ -2675,23 +3479,34 @@ def main():
             else:
                 st.info("⚪ Demo Stopped")
 
+    if nav != "Agentic Workspace":
+        render_brand_header()
+    st.markdown("<div id='main-content'></div>", unsafe_allow_html=True)
+
+    # Optional: retain live/demo toggle for existing components
     mode, _ = select_ui_mode()
     if mode == "Live" and st_autorefresh is None:
         if st.button("Refresh now", key="manual-refresh"):
             st.experimental_rerun()
-    items = load_investigations()
-    if nav == "Operations Console":
-        render_operations_view(items, mode)
-    elif nav == "Investigations":
-        render_investigations_view(items, mode)
-    elif nav == "Real-time Progress":
-        render_realtime_progress_view(mode)
-    elif nav == "Agents Copilot":
-        render_agents_copilot(items, mode)
-    elif nav == "Knowledge Hub":
-        render_knowledge_hub()
-    elif nav == "Compliance":
-        render_compliance_view()
+
+    # Support programmatic navigation (e.g., after Connect/Investigate)
+    pending = st.session_state.pop("nav_override", None)
+    if pending:
+        nav = pending
+
+    # Render selected workflow view
+    if nav == "Agentic Workspace":
+        render_agentic_workspace()
+    elif nav == "Getting Started":
+        render_getting_started_view()
+    elif nav == "Plan":
+        render_plan_view()
+    elif nav == "Investigate":
+        render_investigate_view()
+    elif nav == "Respond":
+        render_respond_view()
+    elif nav == "Adapt":
+        render_adapt_view()
 
 
 if __name__ == "__main__":

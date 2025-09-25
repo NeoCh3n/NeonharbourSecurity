@@ -1,7 +1,7 @@
 PYTHON ?= python3
 PIP ?= pip3
 SAM ?= sam
-STREAMLIT ?= streamlit
+STREAMLIT ?= $(PYTHON) -m streamlit
 
 .DEFAULT_GOAL := help
 
@@ -24,7 +24,11 @@ teardown:
 demo:
 	$(PYTHON) tools/seed/trigger_pipeline.py || true
 	$(PYTHON) tools/metrics/recompute.py
-	$(STREAMLIT) run ui/app.py
+	@if $(PYTHON) -c "import streamlit" >/dev/null 2>&1; then \
+		$(STREAMLIT) run ui/app.py; \
+	else \
+		echo "Streamlit not installed. Run 'make bootstrap' to install demo dependencies."; \
+	fi
 
 fmt:
 	$(PYTHON) -m black src tests ui/app.py

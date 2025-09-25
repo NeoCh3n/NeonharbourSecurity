@@ -1,4 +1,8 @@
-"""Recompute KPI baseline metrics from DynamoDB or local seeds."""
+"""Recompute KPI baseline metrics from DynamoDB or local seeds.
+
+This module works offline. boto3 is optional; if missing or AWS access fails,
+we fall back to a static baseline so `make demo` can continue.
+"""
 from __future__ import annotations
 
 import json
@@ -8,22 +12,26 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Dict
 
-import boto3
-from botocore.exceptions import BotoCoreError, ClientError
-
 METRICS_TABLE = os.getenv("DDB_METRICS_TABLE", "AsiaAgenticSocMetrics-dev")
 OUTPUT_PATH = Path(os.getenv("METRICS_BASELINE_OUTPUT", "out/metrics_baseline.json"))
 
 
 def fetch_metrics(metric_date: str) -> Dict[str, float]:
-    client = boto3.resource("dynamodb")
-    table = client.Table(METRICS_TABLE)
+    # Lazy import to allow offline demo without boto3
     try:
-        result = table.query(
-            KeyConditionExpression="metric_date = :date",
-            ExpressionAttributeValues={":date": metric_date},
-        )
-    except (ClientError, BotoCoreError, ValueError):
+        import boto3  # type: ignore
+        from botocore.exceptions import BotoCoreError, ClientError  # type: ignore
+
+        client = boto3.resource("dynamodb")
+        table = client.Table(METRICS_TABLE)
+        try:
+            result = table.query(
+                KeyConditionExpression="metric_date = :date",
+                ExpressionAttributeValues={":date": metric_date},
+            )
+        except (ClientError, BotoCoreError, ValueError):
+            return {}
+    except Exception:
         return {}
     metrics: Dict[str, float] = {}
     for item in result.get("Items", []):

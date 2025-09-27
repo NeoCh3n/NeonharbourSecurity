@@ -1,1 +1,0 @@
-"""Real-time metrics collection and automation statistics tracking."""

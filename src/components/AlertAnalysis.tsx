@@ -1,15 +1,15 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Textarea } from './ui/textarea';
 import { 
   Brain, 
   Search, 
   BarChart3, 
   Shield, 
-  BookOpen, 
   Play, 
   Pause, 
   RotateCcw,
@@ -23,22 +23,16 @@ import {
   Target,
   GraduationCap
 } from 'lucide-react';
-import { 
-  AgentOrchestrator,
-  PlannerAgent,
-  ContextExecutorAgent,
-  AnalystAgent,
-  RiskOrchestratorAgent,
-  LearningCuratorAgent,
-  AuditReporterAgent,
-  type SecurityAlert,
-  type AgentResponse,
-  type AnalysisPlan,
-  type ContextData,
-  type ThreatAnalysis,
-  type RiskAssessment,
-  type LearningInsights,
-  type ComplianceReport
+import { runtimeService, useRuntimeStore } from '../services/runtime';
+import { features } from '../config/environment';
+import type {
+  SecurityAlert,
+  AnalysisPlan,
+  ContextData,
+  ThreatAnalysis,
+  RiskAssessment,
+  LearningInsights,
+  ComplianceReport
 } from '../services/agents';
 
 interface Agent {
@@ -57,124 +51,87 @@ interface AlertAnalysisProps {
   currentAlertId?: string;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const isAnalysisPlan = (value: unknown): value is AnalysisPlan => {
+  if (!isRecord(value)) return false;
+  return typeof value.planId === 'string' && Array.isArray(value.steps);
+};
+
+const isContextData = (value: unknown): value is ContextData => {
+  if (!isRecord(value)) return false;
+  return Array.isArray(value.threatIntelligence) && Array.isArray(value.assetInformation);
+};
+
+const isThreatAnalysis = (value: unknown): value is ThreatAnalysis => {
+  if (!isRecord(value)) return false;
+  return typeof value.analysisId === 'string' && Array.isArray(value.indicators);
+};
+
+const isRiskAssessment = (value: unknown): value is RiskAssessment => {
+  if (!isRecord(value)) return false;
+  if (typeof value.riskScore !== 'number' || !isRecord(value.impactAnalysis)) return false;
+  const impact = value.impactAnalysis as Record<string, unknown>;
+  return typeof impact.financial === 'number' &&
+    typeof impact.operational === 'number' &&
+    typeof impact.compliance === 'number';
+};
+
+const isLearningInsights = (value: unknown): value is LearningInsights => {
+  if (!isRecord(value)) return false;
+  return typeof value.patternId === 'string' && Array.isArray(value.insights);
+};
+
+const isComplianceReport = (value: unknown): value is ComplianceReport => {
+  if (!isRecord(value)) return false;
+  return typeof value.reportId === 'string' && isRecord(value.content);
+};
+
+const formatBytes = (value?: number) => {
+  if (value == null || Number.isNaN(value)) return '—';
+  if (value < 1024) return `${value} B`;
+  const kb = value / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  const gb = mb / 1024;
+  return `${gb.toFixed(1)} GB`;
+};
+
 export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
-  const [pipelineRunning, setPipelineRunning] = useState(false);
-  const [agentStates, setAgentStates] = useState<Record<string, { status: Agent['status']; progress: number }>>({});
-  const [currentRunningAgent, setCurrentRunningAgent] = useState<string | null>(null);
-  const [pipelineComplete, setPipelineComplete] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState<{
-    status: 'resolved' | 'unresolved';
-    summary: string;
-    actions: string[];
-    uncertainties?: string[];
-    assistanceNeeded?: string[];
-  } | null>(null);
-  const [agentActivities, setAgentActivities] = useState<Record<string, string>>({});
-  
-  const intervalRefs = useRef<Record<string, NodeJS.Timeout>>({});
+  const [approvalNotes, setApprovalNotes] = useState<Record<string, string>>({});
+  const [localError, setLocalError] = useState<string | null>(null);
 
-  // Cleanup intervals on unmount
-  useEffect(() => {
-    return () => {
-      Object.values(intervalRefs.current).forEach(interval => {
-        if (interval) clearInterval(interval);
-      });
-      intervalRefs.current = {};
-    };
-  }, []);
-
-  // Mock alert data - includes all alerts from AlertSummary
-  const alertDetails = {
-    'AL-2025-HK-001': {
-      title: 'Suspicious API calls from unusual geographic location',
-      severity: 'critical' as const,
-      source: 'Amazon GuardDuty',
-      timestamp: '2025-01-15T10:30:00Z',
-      description: 'Multiple high-privilege API calls detected from IP addresses in regions not typically accessed by this account. Potential compromise or unauthorized access attempt.',
-      affectedAssets: ['EC2 Instance i-1234567890abcdef0', 'S3 Bucket prod-data-bucket', 'IAM Role admin-access'],
-      location: 'Eastern Europe',
-      confidence: 87,
-      status: 'investigating'
-    },
-    'AL-2025-HK-002': {
-      title: 'Multiple failed authentication attempts detected',
-      severity: 'high' as const,
-      source: 'AWS Security Hub',
-      timestamp: '2025-01-15T09:45:00Z',
-      description: 'Brute force attack attempt detected against multiple user accounts from distributed IP addresses.',
-      affectedAssets: ['IAM Users', 'Login Portal', 'Authentication Service'],
-      location: 'Multiple Regions',
-      confidence: 92,
-      status: 'analyzing'
-    },
-    'AL-2025-HK-003': {
-      title: 'Unusual network traffic pattern detected',
-      severity: 'medium' as const,
-      source: 'CloudWatch Logs',
-      timestamp: '2025-01-15T08:20:00Z',
-      description: 'Abnormal data transfer volumes detected during off-hours, suggesting potential data exfiltration.',
-      affectedAssets: ['VPC vpc-12345678', 'Database RDS-prod-01'],
-      location: 'Asia Pacific',
-      confidence: 76,
-      status: 'new'
-    },
-    'AL-2025-HK-004': {
-      title: 'Malware signature detected in S3 upload',
-      severity: 'high' as const,
-      source: 'Amazon Security Lake',
-      timestamp: '2025-01-15T07:15:00Z',
-      description: 'Known malware hash detected in file uploaded to S3 bucket. File quarantined automatically.',
-      affectedAssets: ['S3 Bucket uploads-bucket', 'Lambda Function file-scanner'],
-      location: 'Singapore',
-      confidence: 94,
-      status: 'responded'
-    },
-    'AL-2025-HK-005': {
-      title: 'Privilege escalation attempt via IAM policy modification',
-      severity: 'critical' as const,
-      source: 'AWS CloudTrail',
-      timestamp: '2025-01-15T06:30:00Z',
-      description: 'Unauthorized attempt to modify IAM policies to grant excessive permissions. Action blocked by guardrails.',
-      affectedAssets: ['IAM Role admin-role', 'IAM Policy SecurityPolicy'],
-      location: 'Hong Kong',
-      confidence: 91,
-      status: 'resolved'
+  const connection = useRuntimeStore((runtimeState) => runtimeState.connection);
+  const activeRunId = useRuntimeStore((runtimeState) => runtimeState.activeRunId);
+  const runState = useRuntimeStore((runtimeState) => (
+    runtimeState.activeRunId ? runtimeState.runs[runtimeState.activeRunId] : undefined
+  ));
+  const alerts = useRuntimeStore((runtimeState) => runtimeState.alerts);
+  const currentAlert = useMemo(() => {
+    if (currentAlertId && alerts[currentAlertId]) {
+      return alerts[currentAlertId];
     }
-  };
-
-  const currentAlert = currentAlertId ? alertDetails[currentAlertId as keyof typeof alertDetails] : alertDetails['AL-2025-HK-001'];
-
-  // Auto-show results for resolved alerts
-  useEffect(() => {
-    if (currentAlert?.status === 'resolved') {
-      // For resolved alerts, immediately show the analysis result
-      const result = generateAnalysisResult(currentAlert.title, currentAlertId || 'AL-2025-HK-001');
-      setAnalysisResult(result);
-      setPipelineComplete(true);
-      
-      // Set all agents as completed for resolved alerts
-      const completedStates: Record<string, { status: Agent['status']; progress: number }> = {};
-      const completedActivities: Record<string, string> = {};
-      
-      baseAgents.forEach(agent => {
-        completedStates[agent.id] = { status: 'completed', progress: 100 };
-        const activities = getAgentActivities(agent.id);
-        completedActivities[agent.id] = activities[activities.length - 1];
-      });
-      
-      setAgentStates(completedStates);
-      setAgentActivities(completedActivities);
-
-      // Generate mock agent results for resolved alerts to show in analysis tabs
-      const mockAgentResults = generateMockAgentResults(currentAlertId || 'AL-2025-HK-005');
-      setAgentResults(mockAgentResults);
-    } else {
-      // Reset for non-resolved alerts
-      setPipelineComplete(false);
-      setAnalysisResult(null);
+    if (runState?.metadata?.alertId) {
+      return {
+        id: runState.metadata.alertId,
+        title: runState.metadata.alertTitle || runState.metadata.alertId,
+        description: runState.metadata.alertDescription,
+        severity: runState.metadata.severity,
+        source: runState.metadata.source,
+        timestamp: runState.metadata.timestamp,
+        status: runState.metadata.status,
+        location: runState.metadata.location,
+        confidence: runState.metadata.confidence,
+        affectedAssets: runState.metadata.affectedAssets,
+        iocs: runState.metadata.iocs,
+        tags: runState.metadata.tags,
+      };
     }
-  }, [currentAlertId, currentAlert?.status]);
+    return undefined;
+  }, [alerts, currentAlertId, runState]);
 
   const baseAgents: Agent[] = [
     {
@@ -182,8 +139,8 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
       name: 'Planner Agent',
       description: 'Creates comprehensive analysis plans for security incidents',
       stage: 'Plan',
-      status: 'completed',
-      progress: 100,
+      status: 'idle',
+      progress: 0,
       icon: <Brain className="h-5 w-5" />,
       responsibilities: [
         'Generate structured analysis plans based on alert severity and type',
@@ -203,8 +160,8 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
       name: 'Context Executor Agent',
       description: 'Gathers and enriches context for security analysis',
       stage: 'Execute',
-      status: 'running',
-      progress: 75,
+      status: 'idle',
+      progress: 0,
       icon: <Search className="h-5 w-5" />,
       responsibilities: [
         'Collect threat intelligence from multiple sources',
@@ -224,8 +181,8 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
       name: 'Analyst Agent',
       description: 'Performs deep threat analysis and attribution',
       stage: 'Analyze',
-      status: 'running',
-      progress: 45,
+      status: 'idle',
+      progress: 0,
       icon: <BarChart3 className="h-5 w-5" />,
       responsibilities: [
         'Conduct comprehensive threat analysis using ML models',
@@ -305,86 +262,23 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
     }
   ];
 
-  // Agent activity messages based on progress - Ready for Bedrock integration
-  const getAgentActivities = (agentId: string) => {
-    const activities: Record<string, string[]> = {
-      'planner': [
-        'Connecting to Amazon Bedrock Planner Agent...',
-        'Analyzing alert severity and classification...',
-        'Generating comprehensive analysis plan...',
-        'Estimating resource requirements and timeline...',
-        'Prioritizing investigation steps...',
-        'Analysis plan ready for execution'
-      ],
-      'context-executor': [
-        'Initializing Amazon Bedrock Context Agent...',
-        'Gathering threat intelligence from multiple feeds...',
-        'Collecting historical pattern data...',
-        'Enriching with asset and network topology...',
-        'Integrating security policies and compliance data...',
-        'Context enrichment complete'
-      ],
-      'analyst': [
-        'Activating Amazon Bedrock Analyst Agent...',
-        'Performing deep threat analysis with ML models...',
-        'Generating attack timeline and attribution...',
-        'Extracting indicators of compromise (IOCs)...',
-        'Mapping to MITRE ATT&CK framework...',
-        'Cross-referencing with threat intelligence...',
-        'Calculating confidence scores...',
-        'Comprehensive threat analysis complete'
-      ],
-      'risk-orchestrator': [
-        'Engaging Amazon Bedrock Risk Agent...',
-        'Calculating comprehensive risk scores...',
-        'Analyzing financial and operational impact...',
-        'Generating automated response recommendations...',
-        'Checking HKMA compliance requirements...',
-        'Preparing HITL approval workflows...',
-        'Risk assessment and response plan ready'
-      ],
-      'learning-curator': [
-        'Activating Amazon Bedrock Learning Agent...',
-        'Extracting insights from incident patterns...',
-        'Updating detection models with new data...',
-        'Recording performance improvements...',
-        'Optimizing system behavioral parameters...',
-        'Learning adaptation complete'
-      ],
-      'audit-reporter': [
-        'Initializing Amazon Bedrock Audit Agent...',
-        'Generating OGCIO compliance report...',
-        'Creating HKMA regulatory documentation...',
-        'Preparing immutable audit trail...',
-        'Checking 12/48 hour deadline requirements...',
-        'Formatting regulatory submission...',
-        'Compliance report ready for submission'
-      ]
-    };
-    return activities[agentId] || ['Processing...'];
-  };
-
-  const getActivityForProgress = (agentId: string, progress: number) => {
-    const activities = getAgentActivities(agentId);
-    const index = Math.min(Math.floor((progress / 100) * activities.length), activities.length - 1);
-    return activities[index] || activities[0];
-  };
-
-  // Apply dynamic state to agents (start all at 0% initially)
   const agents = useMemo(() => {
+    const runtimeAgents = runState?.agents ?? {};
     return baseAgents.map(agent => {
-      const currentState = agentStates[agent.id];
-      const progress = currentState?.progress ?? (agent.id === 'planner' ? 100 : 0);
-      const status = (currentState?.status as Agent['status']) ?? (agent.id === 'planner' ? 'completed' : 'idle');
+      const runtimeAgent = runtimeAgents[agent.id];
+      const status = runtimeAgent?.status ?? 'idle';
+      const progress = runtimeAgent?.progress ?? 0;
+      const currentActivity = runtimeAgent?.lastActivity ||
+        (status === 'idle' ? 'Awaiting runtime events...' : 'Processing...');
       
       return {
         ...agent,
         status,
         progress,
-        currentActivity: agentActivities[agent.id] || getActivityForProgress(agent.id, progress)
+        currentActivity
       };
     });
-  }, [agentStates, agentActivities]);
+  }, [runState, baseAgents]);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -412,768 +306,155 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
     }
   };
 
-  // Agent processing durations (in seconds) - adjusted for stability
-  const agentDurations: Record<string, number> = {
-    'planner': 0, // Already completed
-    'context-executor': 6,
-    'analyst': 10, // Increased for complex analysis
-    'risk-orchestrator': 5,
-    'learning-curator': 4,
-    'audit-reporter': 3
-  };
+  const pipelineRunning = runState?.status === 'running';
+  const pipelineComplete = runState?.status === 'completed';
+  const pipelineFailed = runState?.status === 'failed';
+  const analysisResult = runState?.outcome ?? null;
+  const pendingApprovals = runState?.approvals.filter((approval) => approval.status === 'pending') ?? [];
+  const artifacts = runState?.artifacts ?? [];
+  const pipelineEnabled = features.multiAgentPipeline;
+  const sequenceGapCount = runState?.sequenceGaps.length ?? 0;
+  const sequenceReplayCount = runState?.sequenceReplays.length ?? 0;
+  const stalled = runState?.status === 'running' && runState.lastEventAt
+    ? Date.now() - new Date(runState.lastEventAt).getTime() > 120000
+    : false;
 
-  // Store agent results for pipeline execution
-  const [agentResults, setAgentResults] = useState<{
-    plan?: AnalysisPlan;
-    context?: ContextData;
-    analysis?: ThreatAnalysis;
-    riskAssessment?: RiskAssessment;
-    learningInsights?: LearningInsights;
-    complianceReport?: ComplianceReport;
-  }>({});
+  const currentRunningAgent = agents.find((agent) => agent.status === 'running')?.id ?? null;
 
-  // Generate analysis results for resolved and ongoing alerts
-  const generateAnalysisResult = (alertTitle: string, alertId?: string) => {
-    // For resolved alerts, return specific results based on alert ID
-    if (currentAlert?.status === 'resolved') {
-      if (alertId === 'AL-2025-HK-005') {
-        return {
-          status: 'resolved' as const,
-          summary: `Analysis complete: The privilege escalation attempt has been successfully blocked by automated guardrails. Investigation confirmed the attempt was made by a compromised service account that gained access through credential stuffing. The account has been disabled and all policies have been restored to their original state.`,
-          actions: [
-            'Automatically blocked IAM policy modification attempt',
-            'Disabled compromised service account sa-backup-automation',
-            'Restored original IAM policy SecurityPolicy to baseline state',
-            'Implemented additional MFA requirements for IAM policy changes',
-            'Added anomaly detection rules for privilege escalation patterns',
-            'Notified security team and initiated credential rotation protocol'
-          ],
-          completedTimestamp: '2025-01-15T06:45:23Z',
-          analysisTime: '15 minutes',
-          confidence: 96
-        };
-      }
-      
-      if (alertId === 'AL-2025-HK-004') {
-        return {
-          status: 'resolved' as const,
-          summary: `Analysis complete: Malware signature successfully identified and contained. The uploaded file contained a known trojan variant that was immediately quarantined by Lambda-based scanning. Source IP has been blocked and no lateral movement detected.`,
-          actions: [
-            'Quarantined malicious file hash e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-            'Blocked source IP 192.0.2.50 at network perimeter',
-            'Scanned all files in uploads-bucket for similar signatures',
-            'Strengthened Lambda file-scanner with updated malware definitions',
-            'Implemented additional file type restrictions for S3 uploads'
-          ],
-          completedTimestamp: '2025-01-15T07:30:15Z',
-          analysisTime: '8 minutes',
-          confidence: 99
-        };
-      }
+  const agentResults = useMemo(() => {
+    const getLatest = (agentId: string) => {
+      const outputs = runState?.agentOutputs?.[agentId];
+      return outputs && outputs.length > 0 ? outputs[outputs.length - 1] : undefined;
+    };
+
+    const plannerOutput = getLatest('planner');
+    const contextOutput = getLatest('context-executor');
+    const analystOutput = getLatest('analyst');
+    const riskOutput = getLatest('risk-orchestrator');
+    const learningOutput = getLatest('learning-curator');
+    const auditOutput = getLatest('audit-reporter');
+
+    return {
+      plan: isAnalysisPlan(plannerOutput) ? plannerOutput : undefined,
+      context: isContextData(contextOutput) ? contextOutput : undefined,
+      analysis: isThreatAnalysis(analystOutput) ? analystOutput : undefined,
+      riskAssessment: isRiskAssessment(riskOutput) ? riskOutput : undefined,
+      learningInsights: isLearningInsights(learningOutput) ? learningOutput : undefined,
+      complianceReport: isComplianceReport(auditOutput) ? auditOutput : undefined,
+    };
+  }, [runState]);
+
+  const hasAgentResults = Object.values(agentResults).some((result) => result != null);
+
+  const runDurationSeconds = runState?.startedAt && runState?.completedAt
+    ? Math.max(0, (new Date(runState.completedAt).getTime() - new Date(runState.startedAt).getTime()) / 1000)
+    : null;
+
+  const connectionBadge = connection.status === 'connected'
+    ? 'bg-green-900/30 text-green-400 border-green-700'
+    : connection.status === 'connecting'
+      ? 'bg-yellow-900/30 text-yellow-400 border-yellow-700'
+      : 'bg-red-900/30 text-red-400 border-red-700';
+
+  const alertDescription = currentAlert?.description || 'Select an alert to view details.';
+  const affectedAssets = currentAlert?.affectedAssets ?? [];
+  const detectionTime = currentAlert?.timestamp
+    ? new Date(currentAlert.timestamp).toLocaleString()
+    : 'N/A';
+  const confidenceScore = currentAlert?.confidence ?? 0;
+  const alertIdLabel = currentAlert?.id ?? currentAlertId ?? 'Unknown alert';
+  const alertSourceLabel = currentAlert?.source ?? 'Unknown source';
+  const alertLocationLabel = currentAlert?.location ?? 'Location unknown';
+  const severityValue = currentAlert?.severity ?? 'unknown';
+  const severityLabel = currentAlert?.severity ? currentAlert.severity.toUpperCase() : 'UNKNOWN';
+
+  const startRun = async () => {
+    if (!pipelineEnabled) {
+      setLocalError('Multi-agent pipeline is disabled by feature flag.');
+      return;
     }
-    
-    // For ongoing alerts, simulate different outcomes
-    const isResolved = Math.random() > 0.3; // 70% resolution rate
-    
-    if (isResolved) {
-      return {
-        status: 'resolved' as const,
-        summary: `Analysis complete: The suspicious activity has been identified as a false positive. The unusual geographic API calls were traced to a legitimate automated backup process initiated by the DevOps team using a new cloud region for disaster recovery testing.`,
-        actions: [
-          'Updated geographic allowlist to include the new backup region',
-          'Notified DevOps team to use proper service accounts for future testing',
-          'Implemented additional context checks for automated processes',
-          'Created whitelist rule for disaster recovery IP ranges'
-        ]
-      };
-    } else {
-      return {
-        status: 'unresolved' as const,
-        summary: `Analysis requires human intervention: The investigation has identified potential indicators of compromise that require additional verification and specialized expertise.`,
-        actions: [
-          'Isolated affected EC2 instances pending further investigation',
-          'Captured network traffic logs for forensic analysis',
-          'Initiated incident response protocol Level 2'
-        ],
-        uncertainties: [
-          'Unable to verify legitimacy of API calls due to insufficient logging detail',
-          'Multiple authentication vectors detected but correlation unclear',
-          'Potential lateral movement indicators require expert validation'
-        ],
-        assistanceNeeded: [
-          'Security analyst review of captured network traffic',
-          'Manual verification of affected user account activities',
-          'Coordination with cloud infrastructure team for detailed access logs',
-          'Possible involvement of external forensics team'
-        ]
-      };
+    if (!currentAlert) {
+      setLocalError('Select an alert to start analysis.');
+      return;
     }
-  };
 
-  // Generate mock agent results for resolved alerts
-  const generateMockAgentResults = (alertId: string) => {
-    const mockResults: {
-      plan?: AnalysisPlan;
-      context?: ContextData;
-      analysis?: ThreatAnalysis;
-      riskAssessment?: RiskAssessment;
-      learningInsights?: LearningInsights;
-      complianceReport?: ComplianceReport;
-    } = {};
+    if (connection.status !== 'connected') {
+      setLocalError('Runtime is not connected. Configure the runtime endpoint in Settings.');
+      return;
+    }
 
-    // Mock Planner Agent Results
-    mockResults.plan = {
-      planId: `plan-${alertId.replace('AL-', 'PLN-')}`,
-      steps: [
-        {
-          stepId: 'step-context',
-          description: 'Gather threat intelligence and asset context',
-          action: 'context_collection',
-          parameters: { 
-            alert_id: alertId,
-            severity: currentAlert.severity,
-            sources: ['threat_intel', 'asset_db', 'historical_data']
-          }
-        },
-        {
-          stepId: 'step-analysis',
-          description: 'Perform detailed threat analysis and attribution',
-          action: 'threat_analysis',
-          parameters: { 
-            analysis_type: 'comprehensive',
-            include_attribution: true,
-            include_timeline: true
-          },
-          dependencies: ['step-context']
-        },
-        {
-          stepId: 'step-risk',
-          description: 'Assess business risk and compliance impact',
-          action: 'risk_assessment',
-          parameters: { 
-            include_financial_impact: true,
-            compliance_frameworks: ['HKMA', 'OGCIO']
-          },
-          dependencies: ['step-analysis']
-        }
-      ],
-      priority: currentAlert.severity === 'critical' ? 1 : 2,
-      estimatedDuration: 1800,
-      requiredResources: ['threat_intelligence', 'asset_database', 'compliance_engine']
-    };
+    setLocalError(null);
 
-    // Mock Context Executor Results
-    mockResults.context = {
-      threatIntelligence: [
-        {
-          source: 'AlienVault OTX',
-          indicators: ['malicious-domain.example.com', '192.0.2.100'],
-          reputation: 'malicious',
-          first_seen: '2025-01-10T00:00:00Z',
-          confidence: 0.89
-        },
-        {
-          source: 'VirusTotal',
-          indicators: ['sha256:a1b2c3d4e5f6789...'],
-          reputation: 'suspicious',
-          first_seen: '2025-01-12T00:00:00Z',
-          confidence: 0.76
-        }
-      ],
-      historicalPatterns: [
-        {
-          pattern_id: 'privilege-escalation-001',
-          similar_incidents: 5,
-          success_rate: 0.2,
-          common_techniques: ['T1078.004', 'T1548.001', 'T1484.001']
-        }
-      ],
-      assetInformation: [
-        {
-          asset_id: 'iam-role-admin',
-          criticality: 'high',
-          location: 'Hong Kong',
-          services: ['IAM', 'Policy Management'],
-          last_patched: '2025-01-01T00:00:00Z'
-        }
-      ],
-      networkTopology: {
-        subnet: '10.0.0.0/16',
-        connected_assets: 42,
-        security_zones: ['Management', 'Production'],
-        access_controls: ['IAM Policies', 'Guard Duty', 'CloudTrail']
-      },
-      securityPolicies: [
-        {
-          policy_id: 'IAM-SEC-001',
-          name: 'Administrative Access Policy',
-          version: '3.2',
-          applicable: true
-        }
-      ]
-    };
+    const iocs = Array.isArray(currentAlert.iocs)
+      ? currentAlert.iocs.map((ioc) => (typeof ioc === 'string' ? ioc : ioc.value)).filter(Boolean)
+      : [];
 
-    // Mock Analyst Results
-    mockResults.analysis = {
-      analysisId: `analysis-${alertId.replace('AL-', 'TAN-')}`,
-      threatType: 'Privilege Escalation',
-      attackVector: 'IAM Policy Manipulation',
-      indicators: [
-        'Unauthorized IAM:PutRolePolicy API call',
-        'Policy modification outside business hours',
-        'Excessive permissions requested',
-        'Service account credential compromise'
-      ],
-      confidence: 0.91,
-      timeline: [
-        {
-          timestamp: '2025-01-15T06:25:00Z',
-          event: 'Service account compromise detected',
-          evidence: 'Unusual login pattern from service account'
-        },
-        {
-          timestamp: '2025-01-15T06:30:00Z',
-          event: 'IAM policy modification attempted',
-          evidence: 'IAM:PutRolePolicy API call with excessive permissions'
-        },
-        {
-          timestamp: '2025-01-15T06:30:15Z',
-          event: 'Automatic policy guardrail triggered',
-          evidence: 'Policy change blocked by compliance engine'
-        }
-      ],
-      attribution: 'Internal Threat Actor - Compromised Service Account',
-      relatedIncidents: ['INC-2024-234', 'INC-2024-298']
-    };
-
-    // Mock Risk Assessment Results
-    mockResults.riskAssessment = {
-      riskScore: 8.7,
-      riskLevel: 'high',
-      impactAnalysis: {
-        financial: 7.5,
-        operational: 8.2,
-        reputational: 6.8,
-        compliance: 9.1
-      },
-      mitigationRecommendations: [
-        'Implement additional MFA for administrative accounts',
-        'Deploy behavioral analytics for service accounts',
-        'Strengthen IAM policy change approval workflows',
-        'Enhance monitoring of privilege escalation attempts'
-      ],
-      requiredActions: [
-        'Immediately disable compromised service account',
-        'Audit all IAM policy changes in past 30 days',
-        'Implement emergency access controls',
-        'Notify HKMA within regulatory timeframe',
-        'Conduct forensic analysis of affected systems'
-      ]
-    };
-
-    // Mock Learning Insights
-    mockResults.learningInsights = {
-      patternId: `pattern-${Date.now()}`,
-      insights: [
-        'Service account compromise patterns indicate credential stuffing attack vector',
-        'Policy modification attempts occur predominantly during off-hours (85% of cases)',
-        'Current IAM guardrails successfully prevented privilege escalation in 97% of attempts',
-        'Similar attack patterns observed across 3 other financial institutions in APAC region'
-      ],
-      recommendations: [
-        'Implement time-based access controls for administrative functions',
-        'Deploy additional behavioral analytics for service account usage patterns',
-        'Enhance integration between threat intelligence and IAM monitoring',
-        'Strengthen incident response playbook for privilege escalation scenarios'
-      ],
-      modelUpdates: [
-        {
-          model: 'privilege_escalation_detection',
-          update_type: 'threshold_adjustment',
-          confidence_improvement: 0.08
-        }
-      ],
-      performanceMetrics: {
-        detection_accuracy: 0.96,
-        false_positive_rate: 0.04,
-        mean_time_to_detection: 45,
-        mean_time_to_response: 230
-      }
-    };
-
-    // Mock Compliance Report
-    mockResults.complianceReport = {
-      reportId: `OGCIO-${Date.now()}`,
-      incidentId: alertId,
-      reportType: 'OGCIO',
-      status: 'submitted',
-      deadline: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(), // 12 hours from now
-      content: {
-        executive_summary: 'Critical privilege escalation attempt detected and successfully mitigated. Compromised service account attempted unauthorized IAM policy modification but was blocked by automated guardrails. No customer data accessed. Full containment achieved within 15 minutes. Investigation completed with all regulatory requirements met.',
-        incident_details: {
-          detection_time: currentAlert.timestamp,
-          incident_type: 'Privilege Escalation',
-          attack_vector: 'IAM Policy Manipulation',
-          affected_systems: ['IAM Service', 'Administrative Roles'],
-          data_classification: 'System Administrative Data',
-          geographical_scope: 'Hong Kong'
-        },
-        impact_assessment: {
-          financial_impact: 'Minimal - no business operations affected',
-          operational_impact: 'None - services maintained throughout incident',
-          customer_impact: 'None - no customer data accessed or compromised',
-          regulatory_implications: 'OGCIO notification completed within required timeframe'
-        },
-        response_actions: {
-          immediate_containment: 'Automated policy guardrails blocked unauthorized changes',
-          investigation_status: 'Complete - full forensic analysis conducted',
-          communication_plan: 'All stakeholders notified, regulatory filing submitted',
-          remediation_timeline: 'Remediation completed within 2 hours of detection'
-        },
-        lessons_learned: {
-          detection_effectiveness: 'Excellent - automated detection within 45 seconds',
-          response_effectiveness: 'Optimal - full containment in under 15 minutes',
-          improvement_areas: ['Service account monitoring', 'Off-hours access controls'],
-          policy_updates: 'Enhanced IAM policy change approval workflow implemented'
-        }
-      },
-      attachments: [
-        'iam_audit_trail.json',
-        'forensic_analysis_report.pdf',
-        'compliance_evidence_package.zip'
-      ]
-    };
-
-    return mockResults;
-  };
-
-  const runAgent = async (agentId: string, startProgress: number = 0) => {
-    const duration = agentDurations[agentId];
-    if (duration === 0) return Promise.resolve();
-
-    // Create alert object from current alert data
     const alertData: SecurityAlert = {
-      id: currentAlertId || 'AL-2025-HK-001',
-      title: currentAlert.title,
-      description: currentAlert.description,
-      severity: currentAlert.severity,
-      source: currentAlert.source,
-      timestamp: currentAlert.timestamp,
-      iocs: currentAlert.affectedAssets || []
-    };
-
-    return new Promise<void>((resolve, reject) => {
-      // Clear any existing interval for this agent
-      if (intervalRefs.current[agentId]) {
-        clearInterval(intervalRefs.current[agentId]);
-        delete intervalRefs.current[agentId];
-      }
-
-      setCurrentRunningAgent(agentId);
-      setAgentStates(prev => ({
-        ...prev,
-        [agentId]: { status: 'running', progress: startProgress }
-      }));
-
-      let progress = startProgress;
-      const incrementStep = (100 - startProgress) / (duration * 10); // Update every 100ms
-      let isCompleted = false;
-      let timeoutId: NodeJS.Timeout | null = null;
-
-      // Execute actual agent call based on agent type
-      const executeAgentCall = async () => {
-        try {
-          let agentResponse: AgentResponse<any>;
-          
-          switch (agentId) {
-            case 'planner':
-              agentResponse = await PlannerAgent.generateAnalysisPlan(alertData);
-              if (agentResponse.success && agentResponse.data) {
-                setAgentResults(prev => ({ ...prev, plan: agentResponse.data }));
-              } else {
-                throw new Error(agentResponse.error || 'Planner agent failed');
-              }
-              break;
-              
-            case 'context-executor':
-              // Create a default context step if no plan is available
-              const contextStep = agentResults.plan?.steps?.find(s => s.action === 'context_collection') || {
-                stepId: 'default-context',
-                description: 'Default context collection',
-                action: 'context_collection',
-                parameters: {
-                  alert_id: alertData.id,
-                  severity: alertData.severity,
-                  sources: ['threat_intel', 'historical_data']
-                }
-              };
-              
-              agentResponse = await ContextExecutorAgent.executeContextCollection(contextStep, alertData);
-              if (agentResponse.success && agentResponse.data) {
-                setAgentResults(prev => ({ ...prev, context: agentResponse.data }));
-              } else {
-                throw new Error(agentResponse.error || 'Context executor agent failed');
-              }
-              break;
-              
-            case 'analyst':
-              // Wait for context to be available or use a default context
-              const contextData = agentResults.context || await new Promise<ContextData>((resolve) => {
-                // Check if context is available in state
-                const checkContext = () => {
-                  if (agentResults.context) {
-                    resolve(agentResults.context);
-                  } else {
-                    // Create minimal context for analysis
-                    resolve({
-                      threatIntelligence: [{
-                        source: 'Internal Analysis',
-                        indicators: alertData.iocs || [],
-                        reputation: 'unknown',
-                        first_seen: alertData.timestamp,
-                        confidence: 0.5
-                      }],
-                      historicalPatterns: [],
-                      assetInformation: [{
-                        asset_id: 'unknown',
-                        criticality: alertData.severity,
-                        location: 'unknown',
-                        services: [],
-                        last_patched: new Date().toISOString()
-                      }],
-                      networkTopology: {},
-                      securityPolicies: []
-                    });
-                  }
-                };
-                setTimeout(checkContext, 100); // Small delay to check for context
-              });
-              
-              agentResponse = await AnalystAgent.performThreatAnalysis(alertData, contextData);
-              if (agentResponse.success && agentResponse.data) {
-                setAgentResults(prev => ({ ...prev, analysis: agentResponse.data }));
-              } else {
-                throw new Error(agentResponse.error || 'Analyst agent failed');
-              }
-              break;
-              
-            case 'risk-orchestrator':
-              // Ensure we have required data
-              const analysisData = agentResults.analysis;
-              const contextForRisk = agentResults.context;
-              
-              if (!analysisData) {
-                throw new Error('Analysis data required for risk assessment');
-              }
-              
-              const finalContextData = contextForRisk || {
-                threatIntelligence: [],
-                historicalPatterns: [],
-                assetInformation: [],
-                networkTopology: {},
-                securityPolicies: []
-              };
-              
-              agentResponse = await RiskOrchestratorAgent.performRiskAssessment(alertData, analysisData, finalContextData);
-              if (agentResponse.success && agentResponse.data) {
-                setAgentResults(prev => ({ ...prev, riskAssessment: agentResponse.data }));
-              } else {
-                throw new Error(agentResponse.error || 'Risk orchestrator agent failed');
-              }
-              break;
-              
-            case 'learning-curator':
-              const analysisForLearning = agentResults.analysis;
-              if (!analysisForLearning) {
-                throw new Error('Analysis data required for learning insights');
-              }
-              
-              agentResponse = await LearningCuratorAgent.extractLearningInsights(alertData, analysisForLearning, { status: 'completed' });
-              if (agentResponse.success && agentResponse.data) {
-                setAgentResults(prev => ({ ...prev, learningInsights: agentResponse.data }));
-              } else {
-                throw new Error(agentResponse.error || 'Learning curator agent failed');
-              }
-              break;
-              
-            case 'audit-reporter':
-              const analysisForAudit = agentResults.analysis;
-              const riskForAudit = agentResults.riskAssessment;
-              
-              if (!analysisForAudit || !riskForAudit) {
-                throw new Error('Analysis and risk assessment data required for compliance report');
-              }
-              
-              agentResponse = await AuditReporterAgent.generateComplianceReport(alertData, analysisForAudit, riskForAudit, 'OGCIO');
-              if (agentResponse.success && agentResponse.data) {
-                setAgentResults(prev => ({ ...prev, complianceReport: agentResponse.data }));
-              } else {
-                throw new Error(agentResponse.error || 'Audit reporter agent failed');
-              }
-              break;
-              
-            default:
-              // Fallback for unknown agent
-              return;
-          }
-          
-          console.log(`Agent ${agentId} executed successfully:`, agentResponse);
-        } catch (error) {
-          console.error(`Agent ${agentId} execution failed:`, error);
-          throw error;
-        }
-      };
-
-      // Start the actual agent execution asynchronously
-      executeAgentCall().catch(error => {
-        console.error(`Error executing ${agentId}:`, error);
-      });
-      
-      const cleanup = () => {
-        if (intervalRefs.current[agentId]) {
-          clearInterval(intervalRefs.current[agentId]);
-          delete intervalRefs.current[agentId];
-        }
-        if (timeoutId) {
-          clearTimeout(timeoutId);
-          timeoutId = null;
-        }
-      };
-
-      const completeAgent = () => {
-        if (isCompleted) return;
-        isCompleted = true;
-        cleanup();
-        
-        setAgentStates(prev => ({
-          ...prev,
-          [agentId]: { status: 'completed', progress: 100 }
-        }));
-        
-        // Set final completion message
-        const activities = getAgentActivities(agentId);
-        setAgentActivities(prev => ({
-          ...prev,
-          [agentId]: activities[activities.length - 1]
-        }));
-        
-        resolve();
-      };
-
-      const failAgent = (error: Error) => {
-        if (isCompleted) return;
-        isCompleted = true;
-        cleanup();
-        
-        setAgentStates(prev => ({
-          ...prev,
-          [agentId]: { status: 'error', progress: Math.round(progress) }
-        }));
-        
-        setAgentActivities(prev => ({
-          ...prev,
-          [agentId]: `Error: ${error.message}`
-        }));
-        
-        reject(error);
-      };
-      
-      intervalRefs.current[agentId] = setInterval(() => {
-        if (isCompleted) return; // Prevent race condition
-        
-        progress = Math.min(100, progress + incrementStep);
-        const currentProgress = Math.round(progress);
-        
-        // Update progress and activity message
-        setAgentStates(prev => ({
-          ...prev,
-          [agentId]: { status: 'running', progress: currentProgress }
-        }));
-
-        // Update current activity based on progress
-        const currentActivity = getActivityForProgress(agentId, currentProgress);
-        setAgentActivities(prev => ({
-          ...prev,
-          [agentId]: currentActivity
-        }));
-
-        if (progress >= 100) {
-          completeAgent();
-        }
-      }, 100);
-
-      // Add timeout as safety measure - increased timeout for stability
-      timeoutId = setTimeout(() => {
-        failAgent(new Error(`Agent ${agentId} timed out after ${duration + 5} seconds`));
-      }, (duration * 1000) + 5000); // 5 second buffer for agent execution
-    });
-  };
-
-  const startPipelineExecution = async () => {
-    setPipelineRunning(true);
-    setPipelineComplete(false);
-    setAnalysisResult(null);
-
-    // Reset all agents to 0% and idle status
-    const initialStates: Record<string, { status: Agent['status']; progress: number }> = {};
-    const initialActivities: Record<string, string> = {};
-    
-    baseAgents.forEach(agent => {
-      initialStates[agent.id] = { 
-        status: agent.id === 'planner' ? 'completed' : 'idle', 
-        progress: agent.id === 'planner' ? 100 : 0 
-      };
-      initialActivities[agent.id] = getActivityForProgress(agent.id, agent.id === 'planner' ? 100 : 0);
-    });
-    
-    setAgentStates(initialStates);
-    setAgentActivities(initialActivities);
-
-    // Initialize with planner results to ensure proper sequencing
-    const alertData: SecurityAlert = {
-      id: currentAlertId || 'AL-2025-HK-001',
-      title: currentAlert.title,
-      description: currentAlert.description,
-      severity: currentAlert.severity,
-      source: currentAlert.source,
-      timestamp: currentAlert.timestamp,
-      iocs: currentAlert.affectedAssets || []
+      id: currentAlert.id,
+      title: currentAlert.title || currentAlert.id,
+      description: currentAlert.description || 'Alert description unavailable.',
+      severity: (currentAlert.severity as SecurityAlert['severity']) ?? 'medium',
+      source: currentAlert.source || 'Unknown source',
+      timestamp: currentAlert.timestamp || new Date().toISOString(),
+      iocs,
+      rawData: {
+        location: currentAlert.location,
+        affectedAssets: currentAlert.affectedAssets,
+        tags: currentAlert.tags,
+        confidence: currentAlert.confidence,
+      },
     };
 
     try {
-      // Initialize planner results for proper dependency handling
-      console.log('Initializing planner results...');
-      const plannerResult = await PlannerAgent.generateAnalysisPlan(alertData);
-      if (plannerResult.success && plannerResult.data) {
-        setAgentResults(prev => ({ ...prev, plan: plannerResult.data }));
-      }
-
-      // Sequential execution of agents with proper error handling
-      console.log('Starting context-executor...');
-      await runAgent('context-executor', 0);
-      
-      console.log('Starting analyst...');
-      await runAgent('analyst', 0);
-      
-      console.log('Starting risk-orchestrator...');
-      await runAgent('risk-orchestrator', 0);
-      
-      console.log('Starting learning-curator...');
-      await runAgent('learning-curator', 0);
-      
-      console.log('Starting audit-reporter...');
-      await runAgent('audit-reporter', 0);
-
-      // Generate final analysis result
-      const result = generateAnalysisResult(currentAlert?.title || '', currentAlertId || 'AL-2025-HK-001');
-      setAnalysisResult(result);
-      setPipelineComplete(true);
-      setCurrentRunningAgent(null);
-      setPipelineRunning(false);
-      
-      console.log('Pipeline execution completed successfully');
-    } catch (error) {
-      console.error('Pipeline execution failed:', error);
-      
-      // Set error state for the current running agent
-      if (currentRunningAgent) {
-        setAgentStates(prev => ({
-          ...prev,
-          [currentRunningAgent]: { status: 'error', progress: prev[currentRunningAgent]?.progress || 0 }
-        }));
-        setAgentActivities(prev => ({
-          ...prev,
-          [currentRunningAgent]: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-        }));
-      }
-      
-      // Clean up any remaining intervals
-      Object.values(intervalRefs.current).forEach(interval => {
-        if (interval) clearInterval(interval);
+      await runtimeService.startRun(alertData, {
+        agent_roles: baseAgents.map((agent) => agent.id),
       });
-      intervalRefs.current = {};
-      
-      // Reset pipeline state
-      setPipelineRunning(false);
-      setCurrentRunningAgent(null);
-      
-      // Show error state for failed agent
-      if (error instanceof Error && error.message.includes('timed out')) {
-        const failedAgent = error.message.match(/Agent (\S+) timed out/)?.[1];
-        if (failedAgent) {
-          setAgentStates(prev => ({
-            ...prev,
-            [failedAgent]: { status: 'error', progress: prev[failedAgent]?.progress || 0 }
-          }));
-          setAgentActivities(prev => ({
-            ...prev,
-            [failedAgent]: `Error: Agent timed out during processing`
-          }));
-        }
-      }
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : 'Failed to start runtime analysis.');
     }
   };
 
-  const togglePipeline = () => {
-    if (pipelineRunning) {
-      // Stop pipeline
-      Object.values(intervalRefs.current).forEach(interval => {
-        if (interval) clearInterval(interval);
-      });
-      intervalRefs.current = {};
-      setPipelineRunning(false);
-      setCurrentRunningAgent(null);
-      
-      // Reset any running agents to idle
-      setAgentStates(prev => {
-        const newStates = { ...prev };
-        Object.keys(newStates).forEach(agentId => {
-          if (newStates[agentId].status === 'running') {
-            newStates[agentId] = { status: 'idle', progress: 0 };
-          }
-        });
-        return newStates;
-      });
-    } else {
-      // Start pipeline
-      startPipelineExecution();
+  const togglePipeline = async () => {
+    if (!pipelineEnabled) {
+      setLocalError('Multi-agent pipeline is disabled by feature flag.');
+      return;
+    }
+    if (pipelineRunning && activeRunId) {
+      try {
+        await runtimeService.stopRun(activeRunId);
+      } catch (error) {
+        setLocalError(error instanceof Error ? error.message : 'Failed to stop the run.');
+      }
+      return;
+    }
+
+    if (!pipelineComplete) {
+      await startRun();
     }
   };
 
   const resetPipeline = () => {
-    // Clean up all running intervals
-    Object.values(intervalRefs.current).forEach(interval => {
-      if (interval) clearInterval(interval);
-    });
-    intervalRefs.current = {};
-    
-    setPipelineRunning(false);
-    setPipelineComplete(false);
-    setAnalysisResult(null);
-    setCurrentRunningAgent(null);
-    
-    const newStates: Record<string, { status: Agent['status']; progress: number }> = {};
-    const newActivities: Record<string, string> = {};
-    
-    baseAgents.forEach(agent => {
-      const isPlanner = agent.id === 'planner';
-      newStates[agent.id] = { 
-        status: isPlanner ? 'completed' : 'idle', 
-        progress: isPlanner ? 100 : 0 
-      };
-      newActivities[agent.id] = getActivityForProgress(agent.id, isPlanner ? 100 : 0);
-    });
-    
-    setAgentStates(newStates);
-    setAgentActivities(newActivities);
+    if (activeRunId) {
+      runtimeService.clearRun(activeRunId);
+    }
+    setApprovalNotes({});
+    setActiveAgent(null);
+    setLocalError(null);
   };
 
-  // Cleanup intervals on unmount
-  useEffect(() => {
-    return () => {
-      Object.values(intervalRefs.current).forEach(interval => clearInterval(interval));
-    };
-  }, []);
+  const handleApprovalDecision = async (requestId: string, decision: 'approved' | 'rejected') => {
+    try {
+      await runtimeService.respondToApproval(requestId, decision, approvalNotes[requestId]);
+      setApprovalNotes((prev) => {
+        const next = { ...prev };
+        delete next[requestId];
+        return next;
+      });
+      setLocalError(null);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : 'Failed to submit approval decision.');
+    }
+  };
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
@@ -1199,18 +480,34 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
                 </CardTitle>
               </div>
               <div className="flex items-center space-x-4">
-                <Badge className={getSeverityColor(currentAlert?.severity || 'medium')}>
-                  {currentAlert?.severity?.toUpperCase() || 'UNKNOWN'}
+                <Badge className={getSeverityColor(severityValue)}>
+                  {severityLabel}
                 </Badge>
                 <span className="text-sm text-slate-300">
-                  {currentAlertId || 'AL-2025-HK-001'} • {currentAlert?.source}
+                  {alertIdLabel} • {alertSourceLabel}
                 </span>
                 <span className="text-sm text-slate-400">
-                  {currentAlert?.location}
+                  {alertLocationLabel}
                 </span>
               </div>
             </div>
             <div className="flex items-center space-x-2">
+              <Badge variant="outline" className={connectionBadge}>
+                Runtime {connection.status}
+              </Badge>
+              <Badge variant="outline" className={pipelineEnabled ? 'bg-green-900/30 text-green-400 border-green-700' : 'bg-slate-700/30 text-slate-300 border-slate-600'}>
+                Pipeline {pipelineEnabled ? 'enabled' : 'disabled'}
+              </Badge>
+              {sequenceGapCount > 0 && (
+                <Badge variant="outline" className="bg-orange-900/30 text-orange-400 border-orange-700">
+                  {sequenceGapCount} gap{sequenceGapCount === 1 ? '' : 's'}
+                </Badge>
+              )}
+              {sequenceReplayCount > 0 && (
+                <Badge variant="outline" className="bg-yellow-900/30 text-yellow-400 border-yellow-700">
+                  {sequenceReplayCount} replay{sequenceReplayCount === 1 ? '' : 's'}
+                </Badge>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -1222,7 +519,7 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
               </Button>
               <Button
                 onClick={togglePipeline}
-                disabled={pipelineComplete}
+                disabled={pipelineComplete || !pipelineEnabled || (!pipelineRunning && connection.status !== 'connected')}
                 className="flex items-center space-x-1 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600"
               >
                 {pipelineRunning ? (
@@ -1246,34 +543,71 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
           </div>
         </CardHeader>
         <CardContent>
-          <p className="text-slate-300 mb-4">{currentAlert?.description}</p>
+          <p className="text-slate-300 mb-4">{alertDescription}</p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <h4 className="font-medium text-sm text-slate-300 mb-2">Affected Assets</h4>
               <div className="space-y-1">
-                {currentAlert?.affectedAssets.map((asset, index) => (
-                  <div key={index} className="text-sm text-slate-300 bg-slate-700/50 rounded px-2 py-1">
-                    {asset}
-                  </div>
-                ))}
+                {affectedAssets.length > 0 ? (
+                  affectedAssets.map((asset, index) => (
+                    <div key={index} className="text-sm text-slate-300 bg-slate-700/50 rounded px-2 py-1">
+                      {asset}
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-sm text-slate-500">No assets reported.</div>
+                )}
               </div>
             </div>
             <div>
               <h4 className="font-medium text-sm text-slate-300 mb-2">Detection Time</h4>
               <div className="text-sm text-slate-400">
-                {currentAlert ? new Date(currentAlert.timestamp).toLocaleString() : 'N/A'}
+                {detectionTime}
               </div>
             </div>
             <div>
               <h4 className="font-medium text-sm text-slate-300 mb-2">Confidence Score</h4>
               <div className="flex items-center space-x-2">
-                <Progress value={currentAlert?.confidence || 0} className="flex-1" />
-                <span className="text-sm font-medium text-white">{currentAlert?.confidence || 0}%</span>
+                <Progress value={confidenceScore} className="flex-1" />
+                <span className="text-sm font-medium text-white">{confidenceScore}%</span>
               </div>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {!currentAlert && (
+        <Card className="bg-slate-800/50 backdrop-blur-sm border-slate-700">
+          <CardContent className="pt-4 text-sm text-slate-300">
+            No alert selected. Choose an alert from the Alert Summary to start a run.
+          </CardContent>
+        </Card>
+      )}
+
+      {!pipelineEnabled && (
+        <Card className="border-l-4 border-l-slate-500 bg-slate-800/50 backdrop-blur-sm border-slate-700">
+          <CardContent className="pt-4 text-sm text-slate-300">
+            Multi-agent pipeline is disabled. Enable `features.multiAgentPipeline` to run analyses.
+          </CardContent>
+        </Card>
+      )}
+
+      {(localError || pipelineFailed) && (
+        <Card className="border-l-4 border-l-red-500 bg-slate-800/50 backdrop-blur-sm border-slate-700">
+          <CardContent className="pt-4 space-y-2 text-sm text-red-200">
+            {localError && <p>{localError}</p>}
+            {pipelineFailed && !localError && <p>The runtime reported a failed run. Review agent events and retry.</p>}
+          </CardContent>
+        </Card>
+      )}
+
+      {stalled && (
+        <Card className="border-l-4 border-l-orange-500 bg-slate-800/50 backdrop-blur-sm border-slate-700">
+          <CardContent className="pt-4 text-sm text-orange-200">
+            Runtime has not emitted events in over 2 minutes. Check runtime health or reconnect.
+          </CardContent>
+        </Card>
+      )}
 
       {/* Multi-Agent Pipeline Analysis Progress */}
       <div className="space-y-4">
@@ -1290,55 +624,143 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-              {agents.map((agent, index) => (
-                <div
-                  key={agent.id}
-                  className={`p-4 border border-slate-600 rounded-lg cursor-pointer transition-all bg-slate-700/30 ${
-                    activeAgent === agent.id ? 'ring-2 ring-blue-400 bg-blue-900/40' : 
-                    currentRunningAgent === agent.id ? 'ring-2 ring-green-400 bg-green-900/40' :
-                    'hover:bg-slate-600/30'
-                  }`}
-                  onClick={() => setActiveAgent(activeAgent === agent.id ? null : agent.id)}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center space-x-2">
-                      <div className="p-1 bg-blue-500/20 rounded text-blue-400">
-                        {agent.icon}
+            {pipelineEnabled ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                {agents.map((agent) => (
+                  <div
+                    key={agent.id}
+                    className={`p-4 border border-slate-600 rounded-lg cursor-pointer transition-all bg-slate-700/30 ${
+                      activeAgent === agent.id ? 'ring-2 ring-blue-400 bg-blue-900/40' : 
+                      currentRunningAgent === agent.id ? 'ring-2 ring-green-400 bg-green-900/40' :
+                      'hover:bg-slate-600/30'
+                    }`}
+                    onClick={() => setActiveAgent(activeAgent === agent.id ? null : agent.id)}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center space-x-2">
+                        <div className="p-1 bg-blue-500/20 rounded text-blue-400">
+                          {agent.icon}
+                        </div>
+                        {getStatusIcon(agent.status)}
                       </div>
-                      {getStatusIcon(agent.status)}
+                      <Badge className={getStatusColor(agent.status)} variant="outline">
+                        {agent.status}
+                      </Badge>
                     </div>
-                    <Badge className={getStatusColor(agent.status)} variant="outline">
-                      {agent.status}
-                    </Badge>
+                    <h3 className="font-medium text-sm mb-1 text-slate-200">{agent.name}</h3>
+                    <p className="text-xs text-slate-400 mb-2">{agent.stage}</p>
+                    <Progress value={agent.progress} className="h-2 mb-2" />
+                    <div className="space-y-1">
+                      <p className="text-xs text-slate-400">{agent.progress}%</p>
+                      {agent.status === 'running' && (
+                        <p className="text-xs text-blue-400 italic min-h-[2.5rem] leading-tight">
+                          {agent.currentActivity}
+                        </p>
+                      )}
+                      {agent.status === 'completed' && (
+                        <p className="text-xs text-green-400 italic">
+                          {agent.currentActivity}
+                        </p>
+                      )}
+                      {agent.status === 'error' && (
+                        <p className="text-xs text-red-400 italic">
+                          {agent.currentActivity || 'Agent failed'}
+                        </p>
+                      )}
+                      {agent.status === 'idle' && (
+                        <p className="text-xs text-slate-500 italic">
+                          Waiting to start...
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <h3 className="font-medium text-sm mb-1 text-slate-200">{agent.name}</h3>
-                  <p className="text-xs text-slate-400 mb-2">{agent.stage}</p>
-                  <Progress value={agent.progress} className="h-2 mb-2" />
-                  <div className="space-y-1">
-                    <p className="text-xs text-slate-400">{agent.progress}%</p>
-                    {agent.status === 'running' && (
-                      <p className="text-xs text-blue-400 italic min-h-[2.5rem] leading-tight">
-                        {agent.currentActivity}
-                      </p>
-                    )}
-                    {agent.status === 'completed' && (
-                      <p className="text-xs text-green-400 italic">
-                        {agent.currentActivity}
-                      </p>
-                    )}
-                    {agent.status === 'idle' && (
-                      <p className="text-xs text-slate-500 italic">
-                        Waiting to start...
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-slate-400">
+                Pipeline rendering is disabled. Enable the feature flag to view agent progress.
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
+
+      {/* Approval Requests */}
+      {pendingApprovals.length > 0 && (
+        <Card className="bg-slate-800/50 backdrop-blur-sm border-slate-700">
+          <CardHeader>
+            <CardTitle className="text-white flex items-center space-x-2">
+              <AlertCircle className="h-5 w-5 text-orange-400" />
+              <span>Approval Required</span>
+            </CardTitle>
+            <CardDescription className="text-slate-300">
+              Runtime actions awaiting human approval
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {pendingApprovals.map((approval) => (
+              <div key={approval.request_id} className="rounded border border-slate-600 bg-slate-700/30 p-4 space-y-3">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h4 className="text-sm font-medium text-white">
+                      {approval.title || 'Approval requested'}
+                    </h4>
+                    <p className="text-xs text-slate-400">
+                      {approval.description || 'Review the requested action and provide a decision.'}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="bg-orange-900/30 text-orange-400 border-orange-700">
+                    Pending
+                  </Badge>
+                </div>
+                {!approval.verified && (
+                  <div className="text-xs text-yellow-300">
+                    Unverified request id. {approval.verificationIssue || 'Missing request_id in runtime payload.'}
+                  </div>
+                )}
+                {approval.payload && (
+                  <pre className="text-xs text-slate-300 bg-slate-900/40 border border-slate-700 rounded p-3 overflow-auto max-h-40">
+                    {(() => {
+                      const preview = typeof approval.payload === 'string'
+                        ? approval.payload
+                        : JSON.stringify(approval.payload, null, 2);
+                      return preview.length > 800 ? `${preview.slice(0, 800)}…` : preview;
+                    })()}
+                  </pre>
+                )}
+                <Textarea
+                  value={approvalNotes[approval.request_id] || ''}
+                  onChange={(event) => setApprovalNotes((prev) => ({
+                    ...prev,
+                    [approval.request_id]: event.target.value,
+                  }))}
+                  placeholder="Add a note for this decision (optional)"
+                  className="bg-slate-900/40 border-slate-600 text-white"
+                />
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    className="bg-green-600 hover:bg-green-700"
+                    disabled={connection.status !== 'connected'}
+                    onClick={() => handleApprovalDecision(approval.request_id, 'approved')}
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-slate-600 text-slate-200 hover:text-white hover:bg-slate-700/50"
+                    disabled={connection.status !== 'connected'}
+                    onClick={() => handleApprovalDecision(approval.request_id, 'rejected')}
+                  >
+                    Reject
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Agent Details */}
       {activeAgent && (
@@ -1370,89 +792,56 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
                 </ul>
               </TabsContent>
               <TabsContent value="artifacts" className="space-y-2">
-                <h4 className="font-medium text-sm text-slate-300 mb-2">Generated Artifacts</h4>
-                <ul className="space-y-1">
-                  {(() => {
-                    const agent = agents.find(a => a.id === activeAgent);
-                    if (!agent) return null;
-                    
-                    // Generate personalized artifacts based on the current alert
-                    const generatePersonalizedArtifacts = (agentId: string) => {
-                      const alertId = alert?.id || 'AL-2025-HK-005';
-                      const alertType = alert?.type || 'Privilege Escalation';
-                      const severity = alert?.severity || 'High';
-                      const timestamp = new Date().toISOString().split('T')[0];
-                      
-                      switch (agentId) {
-                        case 'planner':
-                          return [
-                            `Analysis Plan ${alertId.replace('AL-', 'PLN-')} - ${alertType} Investigation`,
-                            `Resource Allocation Matrix for ${severity} Priority Alert`,
-                            `Timeline: ${alertType} Analysis Workflow (Est. 45min)`,
-                            `Risk Assessment Prerequisites - IAM Policy Review`,
-                            `Escalation Triggers: HKMA Notification Criteria`
-                          ];
-                        
-                        case 'context':
-                          return [
-                            `Threat Intelligence Report: ${alertType} TTPs`,
-                            `Asset Context Map - Affected IAM Resources`,
-                            `Historical Analysis: Similar ${alertType} Incidents (Past 90 days)`,
-                            `Vulnerability Database Cross-reference`,
-                            `Network Topology Impact Assessment`
-                          ];
-                        
-                        case 'analyst':
-                          return [
-                            `Threat Analysis Report ${alertId.replace('AL-', 'TAR-')}`,
-                            `IOC Collection: ${alertType} Indicators (12 artifacts)`,
-                            `Attack Chain Reconstruction: Policy Modification Sequence`,
-                            `Attribution Assessment: APT29 Likelihood Score`,
-                            `Technical Deep Dive: AWS IAM Attack Vectors`
-                          ];
-                        
-                        case 'risk':
-                          return [
-                            `Risk Score Matrix: ${severity} (8.7/10) - ${alertType}`,
-                            `Business Impact Assessment: Financial Services Sector`,
-                            `Compliance Gap Analysis: HKMA Guidelines`,
-                            `Mitigation Action Plan: 6 Immediate Responses`,
-                            `Executive Summary: ${alertType} Risk Exposure`
-                          ];
-                        
-                        case 'learning':
-                          return [
-                            `Pattern Recognition: ${alertType} Evolution Trends`,
-                            `Detection Rule Updates: 3 New Signatures Added`,
-                            `Knowledge Base Entry: ${alertType} Response Playbook`,
-                            `Training Recommendations: IAM Security Best Practices`,
-                            `Lessons Learned: ${alertId} Post-Incident Analysis`
-                          ];
-                        
-                        case 'audit':
-                          return [
-                            `Compliance Report ${alertId.replace('AL-', 'CR-')} - HKMA Submission`,
-                            `Audit Trail: ${alertType} Investigation Evidence`,
-                            `Regulatory Filing: Hong Kong Critical Infrastructure Ordinance`,
-                            `Timeline Documentation: ${timestamp} Incident Response`,
-                            `Legal Hold Notice: ${alertType} Digital Evidence Preservation`
-                          ];
-                        
-                        default:
-                          return agent.artifacts;
-                      }
-                    };
-                    
-                    const personalizedArtifacts = generatePersonalizedArtifacts(activeAgent);
-                    
-                    return personalizedArtifacts.map((artifact, index) => (
-                      <li key={index} className="text-sm text-slate-400 flex items-start space-x-2">
-                        <span className="text-green-400 mt-1">→</span>
-                        <span>{artifact}</span>
-                      </li>
-                    ));
-                  })()}
-                </ul>
+                <h4 className="font-medium text-sm text-slate-300 mb-2">Artifacts & Evidence</h4>
+                {(() => {
+                  const agent = agents.find(a => a.id === activeAgent);
+                  const agentArtifacts = artifacts.filter((artifact) => artifact.agent_id === activeAgent);
+
+                  if (agentArtifacts.length > 0) {
+                    return (
+                      <div className="space-y-2">
+                        {agentArtifacts.map((artifact, index) => (
+                          <div key={`${artifact.artifact_ref.sha256}-${index}`} className="rounded border border-slate-600 bg-slate-700/40 p-3">
+                            <div className="flex items-center justify-between text-xs text-slate-400">
+                              <span className="font-medium text-slate-300">Artifact Ref</span>
+                              {artifact.artifact_ref.content_type && (
+                                <Badge variant="outline" className="border-slate-600 text-slate-300">
+                                  {artifact.artifact_ref.content_type}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="mt-2 text-xs text-slate-300 font-mono break-all">
+                              {artifact.artifact_ref.sha256}
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-400">
+                              <span>Size: {formatBytes(artifact.artifact_ref.size)}</span>
+                              {artifact.artifact_ref.redaction && <span>Redaction: {artifact.artifact_ref.redaction}</span>}
+                              {artifact.artifact_ref.uri && <span className="truncate">URI: {artifact.artifact_ref.uri}</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+
+                  if (agent?.artifacts?.length) {
+                    return (
+                      <div className="space-y-2 text-sm text-slate-400">
+                        <p className="text-xs text-slate-500">Expected artifacts for this agent:</p>
+                        <ul className="space-y-1">
+                          {agent.artifacts.map((artifact, index) => (
+                            <li key={index} className="flex items-start space-x-2">
+                              <span className="text-slate-500 mt-1">•</span>
+                              <span>{artifact}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  }
+
+                  return <p className="text-sm text-slate-500">No artifacts emitted for this agent yet.</p>;
+                })()}
               </TabsContent>
             </Tabs>
           </CardContent>
@@ -1460,7 +849,7 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
       )}
 
       {/* Analysis Results */}
-      {pipelineComplete && analysisResult && (
+      {pipelineEnabled && pipelineComplete && analysisResult && (
         <Card className={`border-l-4 bg-slate-800/50 backdrop-blur-sm border-slate-700 ${analysisResult.status === 'resolved' ? 'border-l-green-500' : 'border-l-orange-500'}`}>
           <CardHeader>
             <div className="flex items-center space-x-2">
@@ -1541,7 +930,7 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
 
             <div className="pt-4 border-t border-slate-600 flex items-center justify-between">
               <div className="text-sm text-slate-400">
-                Pipeline completed in {Object.values(agentDurations).reduce((a, b) => a + b, 0)}s • 
+                Pipeline {runDurationSeconds != null ? `completed in ${runDurationSeconds.toFixed(1)}s` : 'completed'} •
                 {analysisResult.status === 'resolved' ? ' Case closed' : ' Escalated to analyst'}
               </div>
               <div className="flex space-x-2">
@@ -1560,7 +949,7 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
       )}
 
       {/* Real-time Pipeline Status */}
-      {pipelineRunning && currentRunningAgent && (
+      {pipelineEnabled && pipelineRunning && currentRunningAgent && (
         <Card className="border-l-4 border-l-blue-500 bg-slate-800/50 backdrop-blur-sm border-slate-700">
           <CardContent className="pt-6">
             <div className="space-y-4">
@@ -1595,7 +984,7 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
                       {agents.find(a => a.id === currentRunningAgent)?.name} Active
                     </h4>
                     <p className="text-sm text-blue-400 italic">
-                      {agents.find(a => a.id === currentRunningAgent)?.currentActivity}
+                      {agents.find(a => a.id === currentRunningAgent)?.currentActivity || 'Processing...'}
                     </p>
                   </div>
                   <div className="flex items-center space-x-1">
@@ -1610,7 +999,7 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
       )}
 
       {/* Agent Results Details */}
-      {(Object.keys(agentResults).length > 0 || pipelineComplete) && (
+      {pipelineEnabled && (hasAgentResults || pipelineComplete) && (
         <Card className="bg-slate-800/50 backdrop-blur-sm border-slate-700">
           <CardHeader>
             <CardTitle className="text-white flex items-center space-x-2">
@@ -1764,7 +1153,7 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
                 ) : (
                   <div className="text-center py-8 text-slate-400">
                     <Brain className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>Click the Planner Agent tab to view detailed planning results for this resolved alert</p>
+                    <p>Planner results will appear here once emitted by the runtime.</p>
                   </div>
                 )}
               </TabsContent>
@@ -1831,7 +1220,7 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
                 ) : (
                   <div className="text-center py-8 text-slate-400">
                     <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>Click the Context Executor tab to view contextual analysis results for this resolved alert</p>
+                    <p>Context output will appear here once emitted by the runtime.</p>
                   </div>
                 )}
               </TabsContent>
@@ -1904,7 +1293,7 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
                 ) : (
                   <div className="text-center py-8 text-slate-400">
                     <BarChart3 className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>Click the Analyst tab to view detailed threat analysis results for this resolved alert</p>
+                    <p>Threat analysis output will appear here once emitted by the runtime.</p>
                   </div>
                 )}
               </TabsContent>
@@ -2018,7 +1407,7 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
                 ) : (
                   <div className="text-center py-8 text-slate-400">
                     <Shield className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>Click the Risk tab to view detailed risk assessment results for this resolved alert</p>
+                    <p>Risk assessment output will appear here once emitted by the runtime.</p>
                   </div>
                 )}
               </TabsContent>
@@ -2074,7 +1463,7 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
                 ) : (
                   <div className="text-center py-8 text-slate-400">
                     <GraduationCap className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>Click the Learning tab to view insights and recommendations from this resolved alert</p>
+                    <p>Learning insights will appear here once emitted by the runtime.</p>
                   </div>
                 )}
               </TabsContent>
@@ -2150,7 +1539,7 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
                 ) : (
                   <div className="text-center py-8 text-slate-400">
                     <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>Click the Audit tab to view compliance reporting results for this resolved alert</p>
+                    <p>Compliance report output will appear here once emitted by the runtime.</p>
                   </div>
                 )}
               </TabsContent>
@@ -2158,6 +1547,52 @@ export function AlertAnalysis({ currentAlertId }: AlertAnalysisProps) {
           </CardContent>
         </Card>
       )}
+
+      <Card className="bg-slate-800/50 backdrop-blur-sm border-slate-700">
+        <CardHeader>
+          <CardTitle className="text-white flex items-center space-x-2">
+            <FileText className="h-5 w-5 text-blue-400" />
+            <span>Artifacts & Evidence</span>
+          </CardTitle>
+          <CardDescription className="text-slate-300">
+            Evidence references emitted by the runtime (metadata only)
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {artifacts.length === 0 ? (
+            <div className="text-sm text-slate-400">
+              No artifacts reported yet.
+            </div>
+          ) : (
+            artifacts.map((artifact, index) => (
+              <div key={`${artifact.artifact_ref.sha256}-${index}`} className="rounded border border-slate-600 bg-slate-700/30 p-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs text-slate-400">Artifact Ref</div>
+                  {artifact.artifact_ref.content_type && (
+                    <Badge variant="outline" className="border-slate-600 text-slate-300">
+                      {artifact.artifact_ref.content_type}
+                    </Badge>
+                  )}
+                </div>
+                <div className="mt-2 text-xs text-slate-200 font-mono break-all">
+                  {artifact.artifact_ref.sha256}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-400">
+                  <span>Size: {formatBytes(artifact.artifact_ref.size)}</span>
+                  {artifact.artifact_ref.redaction && <span>Redaction: {artifact.artifact_ref.redaction}</span>}
+                  {artifact.agent_id && <span>Agent: {artifact.agent_id}</span>}
+                  {artifact.item_id && <span>Item: {artifact.item_id}</span>}
+                </div>
+                {artifact.artifact_ref.uri && (
+                  <div className="mt-2 text-xs text-slate-500 break-all">
+                    URI: {artifact.artifact_ref.uri}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
 
       {/* Risk Metrics and Compliance */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

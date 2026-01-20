@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { Button } from './ui/button';
 import { Avatar, AvatarFallback } from './ui/avatar';
 import { Badge } from './ui/badge';
@@ -18,6 +19,8 @@ import { Dashboard } from './Dashboard';
 import { AlertAnalysis } from './AlertAnalysis';
 import { AlertSummary } from './AlertSummary';
 import { type User } from '../services/auth';
+import { useRuntimeStore } from '../services/runtime';
+import { features } from '../config/environment';
 
 interface MainLayoutProps {
   selectedSources: string[];
@@ -32,10 +35,12 @@ export function MainLayout({ selectedSources, currentUser, onLogout, onSettings,
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentAlertId, setCurrentAlertId] = useState<string | null>(null);
+  const runtimeConnection = useRuntimeStore((state) => state.connection);
+  const pipelineEnabled = features.multiAgentPipeline;
 
   const handleAlertClick = (alertId: string) => {
     setCurrentAlertId(alertId);
-    setActiveTab('alerts');
+    setActiveTab(pipelineEnabled ? 'alerts' : 'alert-summary');
   };
 
   const handleActiveAlertsClick = () => {
@@ -55,13 +60,18 @@ export function MainLayout({ selectedSources, currentUser, onLogout, onSettings,
       icon: <List className="h-5 w-5" />,
       component: <AlertSummary onAlertClick={handleAlertClick} />
     },
-    {
+    pipelineEnabled ? {
       id: 'alerts',
       name: 'Alert Analysis',
       icon: <AlertTriangle className="h-5 w-5" />,
       component: <AlertAnalysis currentAlertId={currentAlertId} />
-    }
-  ];
+    } : null,
+  ].filter(Boolean) as Array<{
+    id: string;
+    name: string;
+    icon: ReactNode;
+    component: ReactNode;
+  }>;
 
   const getSourceName = (sourceId: string) => {
     const sourceNames: Record<string, string> = {
@@ -246,8 +256,18 @@ export function MainLayout({ selectedSources, currentUser, onLogout, onSettings,
               <Badge variant="outline" className="bg-green-900/30 text-green-400 border-green-700">
                 {selectedSources.length} Sources Active
               </Badge>
-              <Badge variant="outline" className="bg-blue-900/30 text-blue-400 border-blue-700">
-                Pipeline Ready
+              <Badge
+                variant="outline"
+                className={runtimeConnection.status === 'connected'
+                  ? 'bg-green-900/30 text-green-400 border-green-700'
+                  : runtimeConnection.status === 'connecting'
+                    ? 'bg-yellow-900/30 text-yellow-400 border-yellow-700'
+                    : 'bg-red-900/30 text-red-400 border-red-700'}
+              >
+                Runtime {runtimeConnection.status}
+              </Badge>
+              <Badge variant="outline" className={pipelineEnabled ? 'bg-blue-900/30 text-blue-400 border-blue-700' : 'bg-slate-700/30 text-slate-300 border-slate-600'}>
+                Pipeline {pipelineEnabled ? 'Enabled' : 'Disabled'}
               </Badge>
             </div>
           </div>

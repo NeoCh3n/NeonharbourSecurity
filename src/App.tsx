@@ -6,6 +6,7 @@ import { MainLayout } from './components/MainLayout';
 import { Settings } from './components/Settings';
 import { Help } from './components/Help';
 import { ComplianceOfficer } from './components/ComplianceOfficer';
+import { RuntimeErrorBoundary } from './components/RuntimeErrorBoundary';
 import { authManager, getAuthConfig, type User } from './services/auth';
 
 // Get authentication configuration
@@ -113,14 +114,16 @@ export default function App() {
       
       case 'main':
         return (
-          <MainLayout 
-            selectedSources={selectedSources}
-            currentUser={currentUser}
-            onLogout={handleLogout}
-            onSettings={handleSettings}
-            onHelp={handleHelp}
-            onCompliance={handleCompliance}
-          />
+          <RuntimeErrorBoundary>
+            <MainLayout 
+              selectedSources={selectedSources}
+              currentUser={currentUser}
+              onLogout={handleLogout}
+              onSettings={handleSettings}
+              onHelp={handleHelp}
+              onCompliance={handleCompliance}
+            />
+          </RuntimeErrorBoundary>
         );
       
       case 'settings':

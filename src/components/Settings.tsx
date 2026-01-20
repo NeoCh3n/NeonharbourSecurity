@@ -7,21 +7,21 @@ import { Switch } from './ui/switch';
 import { Separator } from './ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Badge } from './ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { 
   ArrowLeft,
   Settings as SettingsIcon,
   Shield,
   Bell,
   Database,
-  Users,
-  Key,
   Globe,
-  Palette,
   Activity,
   AlertCircle,
   CheckCircle,
   Clock
 } from 'lucide-react';
+import { loadRuntimeSettings, runtimeService, useRuntimeStore } from '../services/runtime';
+import { features, isDevelopment } from '../config/environment';
 
 interface SettingsProps {
   onBack: () => void;
@@ -49,6 +49,43 @@ export function Settings({ onBack, selectedSources }: SettingsProps) {
     riskThreshold: 'medium',
     humanApproval: true
   });
+
+  const [runtimeSettings, setRuntimeSettings] = useState(() => loadRuntimeSettings());
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const runtimeConnection = useRuntimeStore((state) => state.connection);
+  const activeRun = useRuntimeStore((state) => (
+    state.activeRunId ? state.runs[state.activeRunId] : undefined
+  ));
+
+  const allowDirectRuntime = isDevelopment();
+  const runtimeModeLabel = runtimeSettings.mode === 'gateway' ? 'SaaS Gateway' : 'Direct Runtime';
+  const sequenceGapCount = activeRun?.sequenceGaps.length ?? 0;
+  const sequenceReplayCount = activeRun?.sequenceReplays.length ?? 0;
+
+  const runtimeStatusBadge = runtimeConnection.status === 'connected'
+    ? 'bg-green-900/30 text-green-400 border-green-700'
+    : runtimeConnection.status === 'connecting'
+      ? 'bg-yellow-900/30 text-yellow-400 border-yellow-700'
+      : 'bg-red-900/30 text-red-400 border-red-700';
+
+  const handleRuntimeSave = () => {
+    runtimeService.setConnectionSettings(runtimeSettings);
+    setRuntimeError(null);
+  };
+
+  const handleRuntimeConnect = async () => {
+    try {
+      setRuntimeError(null);
+      await runtimeService.connect(runtimeSettings);
+    } catch (error) {
+      setRuntimeError(error instanceof Error ? error.message : 'Failed to connect to runtime.');
+    }
+  };
+
+  const handleRuntimeDisconnect = () => {
+    runtimeService.disconnect();
+    setRuntimeError(null);
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -283,6 +320,15 @@ export function Settings({ onBack, selectedSources }: SettingsProps) {
                     onCheckedChange={(checked) => setAnalysis(prev => ({ ...prev, autoAnalysis: checked }))}
                   />
                 </div>
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <Label className="text-slate-300">Multi-Agent Pipeline</Label>
+                    <p className="text-sm text-slate-400">Feature flag for runtime agent orchestration</p>
+                  </div>
+                  <Badge variant="outline" className={features.multiAgentPipeline ? 'border-green-600 text-green-400' : 'border-slate-600 text-slate-400'}>
+                    {features.multiAgentPipeline ? 'Enabled' : 'Disabled'}
+                  </Badge>
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="confidence" className="text-slate-300">Confidence Threshold (%)</Label>
                   <Input 
@@ -303,6 +349,187 @@ export function Settings({ onBack, selectedSources }: SettingsProps) {
                     checked={analysis.humanApproval}
                     onCheckedChange={(checked) => setAnalysis(prev => ({ ...prev, humanApproval: checked }))}
                   />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-slate-800/50 backdrop-blur-sm border-slate-700 shadow-lg shadow-slate-900/20">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center space-x-2">
+                  <Activity className="h-5 w-5 text-cyan-400" />
+                  <span>Runtime Connection</span>
+                </CardTitle>
+                <CardDescription className="text-slate-300">
+                  Configure the customer runtime endpoint for event streaming and approvals
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <Label className="text-slate-300">Connection Status</Label>
+                    <p className="text-sm text-slate-400">Live status of the JSON-RPC runtime stream</p>
+                  </div>
+                  <Badge variant="outline" className={runtimeStatusBadge}>
+                    {runtimeConnection.status}
+                  </Badge>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <Label className="text-slate-300">Runtime Mode</Label>
+                    <p className="text-sm text-slate-400">Gateway (default) or direct runtime for dev</p>
+                  </div>
+                  <Badge variant="outline" className="border-slate-600 text-slate-300">
+                    {runtimeModeLabel}
+                  </Badge>
+                </div>
+
+                {(sequenceGapCount > 0 || sequenceReplayCount > 0) && (
+                  <div className="rounded border border-orange-700/40 bg-orange-900/20 p-3 text-sm text-orange-200">
+                    Sequence issues detected: {sequenceGapCount} gap{sequenceGapCount === 1 ? '' : 's'} ·
+                    {sequenceReplayCount} replay{sequenceReplayCount === 1 ? '' : 's'}
+                  </div>
+                )}
+
+                {runtimeConnection.lastError && (
+                  <div className="text-sm text-red-400">
+                    Last error: {runtimeConnection.lastError}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="runtime-endpoint" className="text-slate-300">Runtime Endpoint</Label>
+                    <Input
+                      id="runtime-endpoint"
+                      value={runtimeSettings.endpoint}
+                      onChange={(event) => setRuntimeSettings((prev) => ({
+                        ...prev,
+                        endpoint: event.target.value,
+                      }))}
+                      placeholder="wss://runtime.neoharbor.local/ws"
+                      className="bg-slate-700/50 border-slate-600 text-white"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="runtime-token" className="text-slate-300">Auth Token</Label>
+                    <Input
+                      id="runtime-token"
+                      type="password"
+                      value={runtimeSettings.authToken}
+                      onChange={(event) => setRuntimeSettings((prev) => ({
+                        ...prev,
+                        authToken: event.target.value,
+                      }))}
+                      placeholder="runtime access token"
+                      className="bg-slate-700/50 border-slate-600 text-white"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="runtime-mode" className="text-slate-300">Connection Mode</Label>
+                    <Select
+                      value={runtimeSettings.mode}
+                      onValueChange={(value) => setRuntimeSettings((prev) => ({
+                        ...prev,
+                        mode: value === 'direct' ? 'direct' : 'gateway',
+                      }))}
+                    >
+                      <SelectTrigger id="runtime-mode" className="bg-slate-700/50 border-slate-600 text-white">
+                        <SelectValue placeholder="Select mode" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="gateway">SaaS Gateway (recommended)</SelectItem>
+                        <SelectItem value="direct" disabled={!allowDirectRuntime}>Direct Runtime (dev only)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {!allowDirectRuntime && (
+                      <p className="text-xs text-slate-500">Direct runtime mode is available in development only.</p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="runtime-org" className="text-slate-300">Org ID</Label>
+                    <Input
+                      id="runtime-org"
+                      value={runtimeSettings.orgId}
+                      onChange={(event) => setRuntimeSettings((prev) => ({
+                        ...prev,
+                        orgId: event.target.value,
+                      }))}
+                      placeholder="org_123"
+                      className="bg-slate-700/50 border-slate-600 text-white"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="runtime-env" className="text-slate-300">Environment</Label>
+                    <Input
+                      id="runtime-env"
+                      value={runtimeSettings.environment}
+                      onChange={(event) => setRuntimeSettings((prev) => ({
+                        ...prev,
+                        environment: event.target.value,
+                      }))}
+                      placeholder="production"
+                      className="bg-slate-700/50 border-slate-600 text-white"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="runtime-id" className="text-slate-300">Runtime ID</Label>
+                    <Input
+                      id="runtime-id"
+                      value={runtimeSettings.runtimeId}
+                      onChange={(event) => setRuntimeSettings((prev) => ({
+                        ...prev,
+                        runtimeId: event.target.value,
+                      }))}
+                      placeholder="runtime-east-1"
+                      className="bg-slate-700/50 border-slate-600 text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <Label className="text-slate-300">Auto-connect</Label>
+                    <p className="text-sm text-slate-400">Reconnect on refresh or reconnect attempts</p>
+                  </div>
+                  <Switch
+                    checked={runtimeSettings.autoConnect}
+                    onCheckedChange={(checked) => setRuntimeSettings((prev) => ({
+                      ...prev,
+                      autoConnect: checked,
+                    }))}
+                  />
+                </div>
+
+                {runtimeError && (
+                  <div className="text-sm text-red-400">
+                    {runtimeError}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleRuntimeSave}
+                    className="border-slate-600 text-slate-300 hover:text-white hover:bg-slate-700/50"
+                  >
+                    Save Settings
+                  </Button>
+                  {runtimeConnection.status === 'connected' ? (
+                    <Button
+                      onClick={handleRuntimeDisconnect}
+                      className="bg-red-600 hover:bg-red-700"
+                    >
+                      Disconnect
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={handleRuntimeConnect}
+                      className="bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600"
+                    >
+                      Connect
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>

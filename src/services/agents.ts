@@ -1,6 +1,8 @@
 // NeoHarbor Security - Multi-Agent Pipeline API Interfaces
 // This file contains API interfaces for all 6 agents that will be connected to Amazon Bedrock
 
+import { runtimeService } from './runtime';
+
 export interface AgentResponse<T = any> {
   success: boolean;
   data?: T;
@@ -93,6 +95,50 @@ export interface ComplianceReport {
   attachments: string[];
 }
 
+interface AgentCallOptions {
+  runId?: string;
+  idempotencyKey?: string;
+}
+
+const buildAgentResponse = <T>(
+  agentId: string,
+  startTime: number,
+  data?: T,
+  error?: string,
+): AgentResponse<T> => ({
+  success: !error,
+  data,
+  error,
+  timestamp: new Date().toISOString(),
+  agentId,
+  executionTime: Date.now() - startTime,
+});
+
+const callRuntimeAgent = async <T>(
+  agentRole: string,
+  agentId: string,
+  input: Record<string, unknown>,
+  options?: AgentCallOptions,
+): Promise<AgentResponse<T>> => {
+  const startTime = Date.now();
+
+  try {
+    const result = await runtimeService.executeAgent(agentRole, input, {
+      runId: options?.runId,
+      idempotency_key: options?.idempotencyKey,
+    });
+
+    return buildAgentResponse(agentId, startTime, result as T);
+  } catch (error) {
+    return buildAgentResponse(
+      agentId,
+      startTime,
+      undefined,
+      error instanceof Error ? error.message : 'Runtime request failed',
+    );
+  }
+};
+
 // =============================================================================
 // AGENT 1: PLANNER AGENT
 // =============================================================================
@@ -102,7 +148,6 @@ export interface ComplianceReport {
  */
 export class PlannerAgent {
   private static readonly AGENT_ID = 'planner-agent';
-  private static readonly BEDROCK_ENDPOINT = typeof process !== 'undefined' ? process.env?.BEDROCK_PLANNER_ENDPOINT || '' : '';
 
   /**
    * Generate an analysis plan for a security alert
@@ -112,75 +157,15 @@ export class PlannerAgent {
    */
   static async generateAnalysisPlan(
     alert: SecurityAlert,
-    context?: Record<string, any>
+    context?: Record<string, any>,
+    options?: AgentCallOptions
   ): Promise<AgentResponse<AnalysisPlan>> {
-    const startTime = Date.now();
-    
-    try {
-      // TODO: Replace with actual Amazon Bedrock Agent call
-      // const response = await this.callBedrockAgent({
-      //   prompt: `Generate analysis plan for alert: ${alert.title}`,
-      //   alert,
-      //   context
-      // });
-
-      // Mock response for now - will be replaced with Bedrock integration
-      const mockPlan: AnalysisPlan = {
-        planId: `plan-${Date.now()}`,
-        steps: [
-          {
-            stepId: 'step-1',
-            description: 'Collect additional context and threat intelligence',
-            action: 'context_collection',
-            parameters: { 
-              alert_id: alert.id,
-              severity: alert.severity,
-              sources: ['threat_intel', 'historical_data']
-            }
-          },
-          {
-            stepId: 'step-2',
-            description: 'Perform detailed threat analysis',
-            action: 'threat_analysis',
-            parameters: { 
-              analysis_type: 'comprehensive',
-              include_attribution: true
-            },
-            dependencies: ['step-1']
-          },
-          {
-            stepId: 'step-3',
-            description: 'Assess risk and impact',
-            action: 'risk_assessment',
-            parameters: { 
-              include_financial_impact: true,
-              compliance_frameworks: ['HKMA', 'OGCIO']
-            },
-            dependencies: ['step-2']
-          }
-        ],
-        priority: alert.severity === 'critical' ? 1 : alert.severity === 'high' ? 2 : 3,
-        estimatedDuration: 1800, // 30 minutes
-        requiredResources: ['threat_intelligence', 'asset_database', 'policy_engine']
-      };
-
-      return {
-        success: true,
-        data: mockPlan,
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error in Planner Agent',
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    }
+    return callRuntimeAgent<AnalysisPlan>(
+      'planner',
+      this.AGENT_ID,
+      { alert, context },
+      options,
+    );
   }
 
   /**
@@ -188,29 +173,15 @@ export class PlannerAgent {
    */
   static async updateAnalysisPlan(
     planId: string,
-    updates: Partial<AnalysisPlan>
+    updates: Partial<AnalysisPlan>,
+    options?: AgentCallOptions
   ): Promise<AgentResponse<AnalysisPlan>> {
-    const startTime = Date.now();
-    
-    try {
-      // TODO: Implement Bedrock Agent call for plan updates
-      
-      return {
-        success: true,
-        data: { ...updates, planId } as AnalysisPlan,
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to update analysis plan',
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    }
+    return callRuntimeAgent<AnalysisPlan>(
+      'planner',
+      this.AGENT_ID,
+      { planId, updates, action: 'update_plan' },
+      options,
+    );
   }
 }
 
@@ -223,7 +194,6 @@ export class PlannerAgent {
  */
 export class ContextExecutorAgent {
   private static readonly AGENT_ID = 'context-executor-agent';
-  private static readonly BEDROCK_ENDPOINT = typeof process !== 'undefined' ? process.env?.BEDROCK_CONTEXT_ENDPOINT || '' : '';
 
   /**
    * Execute context collection based on analysis plan step
@@ -233,79 +203,15 @@ export class ContextExecutorAgent {
    */
   static async executeContextCollection(
     step: AnalysisStep,
-    alert: SecurityAlert
+    alert: SecurityAlert,
+    options?: AgentCallOptions
   ): Promise<AgentResponse<ContextData>> {
-    const startTime = Date.now();
-    
-    try {
-      // TODO: Replace with Amazon Bedrock Agent call
-      // const response = await this.callBedrockAgent({
-      //   action: step.action,
-      //   parameters: step.parameters,
-      //   alert
-      // });
-
-      // Mock context data - will be replaced with Bedrock integration
-      const mockContext: ContextData = {
-        threatIntelligence: [
-          {
-            source: 'AlienVault OTX',
-            indicators: alert.iocs || [],
-            reputation: 'malicious',
-            first_seen: '2025-01-10T00:00:00Z',
-            confidence: 0.85
-          }
-        ],
-        historicalPatterns: [
-          {
-            pattern_id: 'pattern-001',
-            similar_incidents: 3,
-            success_rate: 0.67,
-            common_techniques: ['T1566.001', 'T1204.002']
-          }
-        ],
-        assetInformation: [
-          {
-            asset_id: 'server-prod-001',
-            criticality: 'high',
-            location: 'HK-DC-01',
-            services: ['web', 'database'],
-            last_patched: '2025-01-01T00:00:00Z'
-          }
-        ],
-        networkTopology: {
-          subnet: '10.0.1.0/24',
-          connected_assets: 15,
-          security_zones: ['DMZ', 'Internal'],
-          access_controls: ['firewall', 'IDS']
-        },
-        securityPolicies: [
-          {
-            policy_id: 'SEC-001',
-            name: 'Incident Response Policy',
-            version: '2.1',
-            applicable: true
-          }
-        ]
-      };
-
-      return {
-        success: true,
-        data: mockContext,
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Context collection failed',
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    }
+    return callRuntimeAgent<ContextData>(
+      'context-executor',
+      this.AGENT_ID,
+      { step, alert },
+      options,
+    );
   }
 
   /**
@@ -313,39 +219,15 @@ export class ContextExecutorAgent {
    */
   static async enrichAlert(
     alert: SecurityAlert,
-    sources: string[]
+    sources: string[],
+    options?: AgentCallOptions
   ): Promise<AgentResponse<SecurityAlert>> {
-    const startTime = Date.now();
-    
-    try {
-      // TODO: Implement Bedrock Agent call for alert enrichment
-      
-      const enrichedAlert = {
-        ...alert,
-        iocs: [...(alert.iocs || []), 'malicious.example.com', '192.168.1.100'],
-        rawData: {
-          ...alert.rawData,
-          enriched_at: new Date().toISOString(),
-          enrichment_sources: sources
-        }
-      };
-
-      return {
-        success: true,
-        data: enrichedAlert,
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Alert enrichment failed',
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    }
+    return callRuntimeAgent<SecurityAlert>(
+      'context-executor',
+      this.AGENT_ID,
+      { alert, sources, action: 'enrich_alert' },
+      options,
+    );
   }
 }
 
@@ -358,7 +240,6 @@ export class ContextExecutorAgent {
  */
 export class AnalystAgent {
   private static readonly AGENT_ID = 'analyst-agent';
-  private static readonly BEDROCK_ENDPOINT = typeof process !== 'undefined' ? process.env?.BEDROCK_ANALYST_ENDPOINT || '' : '';
 
   /**
    * Perform comprehensive threat analysis
@@ -368,104 +249,30 @@ export class AnalystAgent {
    */
   static async performThreatAnalysis(
     alert: SecurityAlert,
-    context: ContextData
+    context: ContextData,
+    options?: AgentCallOptions
   ): Promise<AgentResponse<ThreatAnalysis>> {
-    const startTime = Date.now();
-    
-    try {
-      // TODO: Replace with Amazon Bedrock Agent call
-      // const response = await this.callBedrockAgent({
-      //   alert,
-      //   context,
-      //   analysis_type: 'comprehensive'
-      // });
-
-      // Mock analysis - will be replaced with Bedrock integration
-      const mockAnalysis: ThreatAnalysis = {
-        analysisId: `analysis-${Date.now()}`,
-        threatType: 'Advanced Persistent Threat',
-        attackVector: 'Spear Phishing Email',
-        indicators: [
-          'Suspicious email attachment',
-          'Outbound C2 communication',
-          'Lateral movement detected',
-          'Data exfiltration attempt'
-        ],
-        confidence: 0.87,
-        timeline: [
-          {
-            timestamp: '2025-01-15T10:30:00Z',
-            event: 'Initial compromise via email',
-            evidence: 'Email attachment execution'
-          },
-          {
-            timestamp: '2025-01-15T10:45:00Z',
-            event: 'Persistence mechanism established',
-            evidence: 'Registry modification detected'
-          },
-          {
-            timestamp: '2025-01-15T11:15:00Z',
-            event: 'Lateral movement initiated',
-            evidence: 'SMB connection to internal server'
-          }
-        ],
-        attribution: 'APT29 (Cozy Bear) - Medium Confidence',
-        relatedIncidents: ['INC-2024-089', 'INC-2024-156']
-      };
-
-      return {
-        success: true,
-        data: mockAnalysis,
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Threat analysis failed',
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    }
+    return callRuntimeAgent<ThreatAnalysis>(
+      'analyst',
+      this.AGENT_ID,
+      { alert, context },
+      options,
+    );
   }
 
   /**
    * Generate IOCs (Indicators of Compromise) from analysis
    */
   static async generateIOCs(
-    analysis: ThreatAnalysis
+    analysis: ThreatAnalysis,
+    options?: AgentCallOptions
   ): Promise<AgentResponse<string[]>> {
-    const startTime = Date.now();
-    
-    try {
-      // TODO: Implement Bedrock Agent call for IOC generation
-      
-      const iocs = [
-        'sha256:a1b2c3d4e5f6...',
-        'malicious-domain.example.com',
-        '192.168.100.50',
-        'HKEY_LOCAL_MACHINE\\Software\\Malware\\Key'
-      ];
-
-      return {
-        success: true,
-        data: iocs,
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'IOC generation failed',
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    }
+    return callRuntimeAgent<string[]>(
+      'analyst',
+      this.AGENT_ID,
+      { analysis, action: 'generate_iocs' },
+      options,
+    );
   }
 }
 
@@ -478,7 +285,6 @@ export class AnalystAgent {
  */
 export class RiskOrchestratorAgent {
   private static readonly AGENT_ID = 'risk-orchestrator-agent';
-  private static readonly BEDROCK_ENDPOINT = typeof process !== 'undefined' ? process.env?.BEDROCK_RISK_ENDPOINT || '' : '';
 
   /**
    * Perform comprehensive risk assessment
@@ -490,61 +296,15 @@ export class RiskOrchestratorAgent {
   static async performRiskAssessment(
     alert: SecurityAlert,
     analysis: ThreatAnalysis,
-    context: ContextData
+    context: ContextData,
+    options?: AgentCallOptions
   ): Promise<AgentResponse<RiskAssessment>> {
-    const startTime = Date.now();
-    
-    try {
-      // TODO: Replace with Amazon Bedrock Agent call
-      // const response = await this.callBedrockAgent({
-      //   alert,
-      //   analysis,
-      //   context,
-      //   frameworks: ['HKMA', 'OGCIO']
-      // });
-
-      // Mock risk assessment - will be replaced with Bedrock integration
-      const mockAssessment: RiskAssessment = {
-        riskScore: 8.5,
-        riskLevel: 'high',
-        impactAnalysis: {
-          financial: 7.2,
-          operational: 8.0,
-          reputational: 6.8,
-          compliance: 9.1
-        },
-        mitigationRecommendations: [
-          'Immediate isolation of affected systems',
-          'Deploy additional monitoring on critical assets',
-          'Activate incident response team',
-          'Prepare regulatory notifications',
-          'Implement enhanced access controls'
-        ],
-        requiredActions: [
-          'CRITICAL: Notify OGCIO within 12 hours',
-          'HIGH: Execute containment procedures',
-          'MEDIUM: Conduct forensic analysis',
-          'LOW: Review and update security policies'
-        ]
-      };
-
-      return {
-        success: true,
-        data: mockAssessment,
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Risk assessment failed',
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    }
+    return callRuntimeAgent<RiskAssessment>(
+      'risk-orchestrator',
+      this.AGENT_ID,
+      { alert, analysis, context },
+      options,
+    );
   }
 
   /**
@@ -552,38 +312,15 @@ export class RiskOrchestratorAgent {
    */
   static async generateResponsePlan(
     riskAssessment: RiskAssessment,
-    alert: SecurityAlert
+    alert: SecurityAlert,
+    options?: AgentCallOptions
   ): Promise<AgentResponse<any>> {
-    const startTime = Date.now();
-    
-    try {
-      // TODO: Implement Bedrock Agent call for response planning
-      
-      const responsePlan = {
-        immediate_actions: riskAssessment.requiredActions.filter(a => a.startsWith('CRITICAL')),
-        short_term_actions: riskAssessment.requiredActions.filter(a => a.startsWith('HIGH')),
-        long_term_actions: riskAssessment.requiredActions.filter(a => a.startsWith('MEDIUM')),
-        approval_required: riskAssessment.riskLevel === 'critical',
-        estimated_duration: '4-6 hours',
-        resources_needed: ['incident_response_team', 'forensics_team', 'legal_team']
-      };
-
-      return {
-        success: true,
-        data: responsePlan,
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Response plan generation failed',
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    }
+    return callRuntimeAgent(
+      'risk-orchestrator',
+      this.AGENT_ID,
+      { riskAssessment, alert, action: 'generate_response_plan' },
+      options,
+    );
   }
 }
 
@@ -596,7 +333,6 @@ export class RiskOrchestratorAgent {
  */
 export class LearningCuratorAgent {
   private static readonly AGENT_ID = 'learning-curator-agent';
-  private static readonly BEDROCK_ENDPOINT = typeof process !== 'undefined' ? process.env?.BEDROCK_LEARNING_ENDPOINT || '' : '';
 
   /**
    * Extract learning insights from completed incident analysis
@@ -608,108 +344,30 @@ export class LearningCuratorAgent {
   static async extractLearningInsights(
     alert: SecurityAlert,
     analysis: ThreatAnalysis,
-    outcome: any
+    outcome: any,
+    options?: AgentCallOptions
   ): Promise<AgentResponse<LearningInsights>> {
-    const startTime = Date.now();
-    
-    try {
-      // TODO: Replace with Amazon Bedrock Agent call
-      // const response = await this.callBedrockAgent({
-      //   alert,
-      //   analysis,
-      //   outcome,
-      //   learning_type: 'pattern_extraction'
-      // });
-
-      // Mock learning insights - will be replaced with Bedrock integration
-      const mockInsights: LearningInsights = {
-        patternId: `pattern-${Date.now()}`,
-        insights: [
-          'Spear phishing emails targeting finance department increased by 45%',
-          'APT29 TTPs have evolved to include new persistence mechanisms',
-          'Detection rule R-045 has 23% false positive rate - needs tuning',
-          'Response time improved by 30% with automated containment'
-        ],
-        recommendations: [
-          'Update email security training for finance team',
-          'Deploy additional behavioral analytics for lateral movement',
-          'Refine detection rule R-045 threshold parameters',
-          'Expand automated response capabilities to medium-risk incidents'
-        ],
-        modelUpdates: [
-          {
-            model: 'threat_classification',
-            update_type: 'weight_adjustment',
-            confidence_improvement: 0.12
-          },
-          {
-            model: 'behavioral_analysis',
-            update_type: 'new_pattern',
-            pattern_id: 'lateral_movement_v2'
-          }
-        ],
-        performanceMetrics: {
-          detection_accuracy: 0.94,
-          false_positive_rate: 0.08,
-          mean_time_to_detection: 287,
-          mean_time_to_response: 1245
-        }
-      };
-
-      return {
-        success: true,
-        data: mockInsights,
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Learning extraction failed',
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    }
+    return callRuntimeAgent<LearningInsights>(
+      'learning-curator',
+      this.AGENT_ID,
+      { alert, analysis, outcome },
+      options,
+    );
   }
 
   /**
    * Update detection models based on learning insights
    */
   static async updateDetectionModels(
-    insights: LearningInsights
+    insights: LearningInsights,
+    options?: AgentCallOptions
   ): Promise<AgentResponse<any>> {
-    const startTime = Date.now();
-    
-    try {
-      // TODO: Implement Bedrock Agent call for model updates
-      
-      const updateResults = {
-        models_updated: insights.modelUpdates.length,
-        success_rate: 1.0,
-        performance_improvement: 0.15,
-        deployment_status: 'scheduled',
-        rollback_plan: 'available'
-      };
-
-      return {
-        success: true,
-        data: updateResults,
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Model update failed',
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    }
+    return callRuntimeAgent(
+      'learning-curator',
+      this.AGENT_ID,
+      { insights, action: 'update_models' },
+      options,
+    );
   }
 }
 
@@ -722,7 +380,6 @@ export class LearningCuratorAgent {
  */
 export class AuditReporterAgent {
   private static readonly AGENT_ID = 'audit-reporter-agent';
-  private static readonly BEDROCK_ENDPOINT = typeof process !== 'undefined' ? process.env?.BEDROCK_AUDIT_ENDPOINT || '' : '';
 
   /**
    * Generate regulatory compliance report
@@ -736,126 +393,30 @@ export class AuditReporterAgent {
     alert: SecurityAlert,
     analysis: ThreatAnalysis,
     riskAssessment: RiskAssessment,
-    reportType: 'OGCIO' | 'HKMA' | 'Internal'
+    reportType: 'OGCIO' | 'HKMA' | 'Internal',
+    options?: AgentCallOptions
   ): Promise<AgentResponse<ComplianceReport>> {
-    const startTime = Date.now();
-    
-    try {
-      // TODO: Replace with Amazon Bedrock Agent call
-      // const response = await this.callBedrockAgent({
-      //   alert,
-      //   analysis,
-      //   riskAssessment,
-      //   reportType,
-      //   template: `${reportType}_incident_report`
-      // });
-
-      // Calculate deadline based on severity and type
-      const now = new Date();
-      const deadline = new Date(now);
-      if (alert.severity === 'critical') {
-        deadline.setHours(deadline.getHours() + 12); // 12 hours for critical
-      } else {
-        deadline.setHours(deadline.getHours() + 48); // 48 hours for others
-      }
-
-      // Mock compliance report - will be replaced with Bedrock integration
-      const mockReport: ComplianceReport = {
-        reportId: `${reportType}-${Date.now()}`,
-        incidentId: alert.id,
-        reportType,
-        status: 'ready',
-        deadline: deadline.toISOString(),
-        content: {
-          executive_summary: `Critical security incident detected on ${alert.timestamp}. ${analysis.threatType} identified with ${analysis.confidence * 100}% confidence. Immediate containment measures activated. No customer data compromised. Full investigation ongoing.`,
-          incident_details: {
-            detection_time: alert.timestamp,
-            incident_type: analysis.threatType,
-            attack_vector: analysis.attackVector,
-            affected_systems: ['server-prod-001', 'workstation-fin-025'],
-            data_classification: 'Confidential',
-            geographical_scope: 'Hong Kong only'
-          },
-          impact_assessment: {
-            financial_impact: `HKD ${riskAssessment.impactAnalysis.financial * 100000}`,
-            operational_impact: riskAssessment.impactAnalysis.operational > 7 ? 'High' : 'Medium',
-            customer_impact: 'None - services maintained',
-            regulatory_implications: 'OGCIO notification required within 12 hours'
-          },
-          response_actions: {
-            immediate_containment: 'Isolated affected systems within 15 minutes',
-            investigation_status: 'Ongoing - forensic analysis in progress',
-            communication_plan: 'Internal stakeholders notified, customer communication prepared',
-            remediation_timeline: '72 hours for full remediation'
-          },
-          lessons_learned: {
-            detection_effectiveness: 'Security controls performed as expected',
-            response_effectiveness: 'Incident response plan executed successfully',
-            improvement_areas: ['Employee training on spear phishing', 'Enhanced email filtering'],
-            policy_updates: 'Review and update remote access policies'
-          }
-        },
-        attachments: [
-          'forensic_evidence.zip',
-          'network_logs.tar.gz',
-          'incident_timeline.pdf'
-        ]
-      };
-
-      return {
-        success: true,
-        data: mockReport,
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Compliance report generation failed',
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    }
+    return callRuntimeAgent<ComplianceReport>(
+      'audit-reporter',
+      this.AGENT_ID,
+      { alert, analysis, riskAssessment, reportType },
+      options,
+    );
   }
 
   /**
    * Submit compliance report to regulatory body
    */
   static async submitReport(
-    report: ComplianceReport
+    report: ComplianceReport,
+    options?: AgentCallOptions
   ): Promise<AgentResponse<any>> {
-    const startTime = Date.now();
-    
-    try {
-      // TODO: Implement actual submission to regulatory systems
-      
-      const submissionResult = {
-        submission_id: `SUB-${Date.now()}`,
-        submitted_at: new Date().toISOString(),
-        status: 'submitted',
-        confirmation_number: `OGCIO-${Date.now()}`,
-        acknowledgment_expected: '24 hours'
-      };
-
-      return {
-        success: true,
-        data: submissionResult,
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Report submission failed',
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    }
+    return callRuntimeAgent(
+      'audit-reporter',
+      this.AGENT_ID,
+      { report, action: 'submit_report' },
+      options,
+    );
   }
 
   /**
@@ -864,43 +425,15 @@ export class AuditReporterAgent {
   static async generateAuditTrail(
     incidentId: string,
     startDate: string,
-    endDate: string
+    endDate: string,
+    options?: AgentCallOptions
   ): Promise<AgentResponse<any>> {
-    const startTime = Date.now();
-    
-    try {
-      // TODO: Implement Bedrock Agent call for audit trail generation
-      
-      const auditTrail = {
-        incident_id: incidentId,
-        period: `${startDate} to ${endDate}`,
-        total_entries: 1247,
-        ai_actions: 891,
-        human_actions: 356,
-        compliance_impact_high: 23,
-        compliance_impact_medium: 156,
-        compliance_impact_low: 1068,
-        export_format: 'regulatory_standard',
-        digital_signature: 'SHA256:abc123...',
-        verification_status: 'verified'
-      };
-
-      return {
-        success: true,
-        data: auditTrail,
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Audit trail generation failed',
-        timestamp: new Date().toISOString(),
-        agentId: this.AGENT_ID,
-        executionTime: Date.now() - startTime
-      };
-    }
+    return callRuntimeAgent(
+      'audit-reporter',
+      this.AGENT_ID,
+      { incidentId, startDate, endDate, action: 'generate_audit_trail' },
+      options,
+    );
   }
 }
 
@@ -917,7 +450,10 @@ export class AgentOrchestrator {
    * @param alert - Security alert to process
    * @returns Complete analysis results from all agents
    */
-  static async executeFullPipeline(alert: SecurityAlert): Promise<{
+  static async executeFullPipeline(
+    alert: SecurityAlert,
+    options?: { runId?: string; maxRetries?: number },
+  ): Promise<{
     plan: AgentResponse<AnalysisPlan>;
     context: AgentResponse<ContextData>;
     analysis: AgentResponse<ThreatAnalysis>;
@@ -925,46 +461,201 @@ export class AgentOrchestrator {
     learningInsights: AgentResponse<LearningInsights>;
     complianceReport: AgentResponse<ComplianceReport>;
   }> {
-    // Step 1: Plan the analysis
-    const plan = await PlannerAgent.generateAnalysisPlan(alert);
-    
-    if (!plan.success || !plan.data) {
-      throw new Error('Failed to generate analysis plan');
+    const maxRetries = options?.maxRetries ?? 2;
+    const startRunResult = options?.runId
+      ? { run_id: options.runId }
+      : await runtimeService.startRun(alert);
+    const runId = startRunResult.run_id;
+
+    const fallbackContext: ContextData = {
+      threatIntelligence: [],
+      historicalPatterns: [],
+      assetInformation: [],
+      networkTopology: {},
+      securityPolicies: [],
+    };
+
+    const dependencyError = <T>(message: string): AgentResponse<T> =>
+      buildAgentResponse('orchestrator', Date.now(), undefined, message);
+
+    const executeWithRetry = async <T>(
+      taskId: string,
+      executor: (idempotencyKey: string) => Promise<AgentResponse<T>>,
+    ): Promise<AgentResponse<T>> => {
+      const idempotencyKey = `${runId}:${taskId}:${alert.id}`;
+      let attempt = 0;
+      let response: AgentResponse<T> | undefined;
+
+      while (attempt <= maxRetries) {
+        response = await executor(idempotencyKey);
+        if (response.success) return response;
+
+        attempt += 1;
+        if (attempt > maxRetries) break;
+        await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
+      }
+
+      return response ?? dependencyError<T>('Agent execution failed.');
+    };
+
+    type TaskId =
+      | 'planner'
+      | 'context-executor'
+      | 'analyst'
+      | 'risk-orchestrator'
+      | 'learning-curator'
+      | 'audit-reporter';
+
+    type Task = {
+      id: TaskId;
+      dependsOn: TaskId[];
+      run: (idempotencyKey: string) => Promise<AgentResponse<any>>;
+    };
+
+    const results = new Map<TaskId, AgentResponse<any>>();
+
+    const tasks: Task[] = [
+      {
+        id: 'planner',
+        dependsOn: [],
+        run: (idempotencyKey) =>
+          PlannerAgent.generateAnalysisPlan(alert, undefined, {
+            runId,
+            idempotencyKey,
+          }),
+      },
+      {
+        id: 'context-executor',
+        dependsOn: ['planner'],
+        run: (idempotencyKey) => {
+          const plan = results.get('planner')?.data as AnalysisPlan | undefined;
+          const contextStep = plan?.steps?.find((step) => step.action === 'context_collection') ?? {
+            stepId: 'context-default',
+            description: 'Default context collection',
+            action: 'context_collection',
+            parameters: {
+              alert_id: alert.id,
+              severity: alert.severity,
+              sources: ['threat_intel', 'historical_data'],
+            },
+          };
+          return ContextExecutorAgent.executeContextCollection(contextStep, alert, {
+            runId,
+            idempotencyKey,
+          });
+        },
+      },
+      {
+        id: 'analyst',
+        dependsOn: ['planner'],
+        run: (idempotencyKey) => {
+          const context = (results.get('context-executor')?.data as ContextData | undefined) ?? fallbackContext;
+          return AnalystAgent.performThreatAnalysis(alert, context, {
+            runId,
+            idempotencyKey,
+          });
+        },
+      },
+      {
+        id: 'risk-orchestrator',
+        dependsOn: ['analyst'],
+        run: (idempotencyKey) => {
+          const analysis = results.get('analyst')?.data as ThreatAnalysis | undefined;
+          if (!analysis) {
+            return dependencyError<RiskAssessment>('Analysis required for risk assessment.');
+          }
+          const context = (results.get('context-executor')?.data as ContextData | undefined) ?? fallbackContext;
+          return RiskOrchestratorAgent.performRiskAssessment(alert, analysis, context, {
+            runId,
+            idempotencyKey,
+          });
+        },
+      },
+      {
+        id: 'learning-curator',
+        dependsOn: ['analyst'],
+        run: (idempotencyKey) => {
+          const analysis = results.get('analyst')?.data as ThreatAnalysis | undefined;
+          if (!analysis) {
+            return dependencyError<LearningInsights>('Analysis required for learning insights.');
+          }
+          return LearningCuratorAgent.extractLearningInsights(
+            alert,
+            analysis,
+            { status: 'completed' },
+            { runId, idempotencyKey },
+          );
+        },
+      },
+      {
+        id: 'audit-reporter',
+        dependsOn: ['risk-orchestrator'],
+        run: (idempotencyKey) => {
+          const analysis = results.get('analyst')?.data as ThreatAnalysis | undefined;
+          const risk = results.get('risk-orchestrator')?.data as RiskAssessment | undefined;
+          if (!analysis || !risk) {
+            return dependencyError<ComplianceReport>('Risk assessment required for compliance report.');
+          }
+          return AuditReporterAgent.generateComplianceReport(alert, analysis, risk, 'OGCIO', {
+            runId,
+            idempotencyKey,
+          });
+        },
+      },
+    ];
+
+    const pending = new Map(tasks.map((task) => [task.id, task]));
+    const completed = new Set<TaskId>();
+    const failed = new Set<TaskId>();
+
+    while (pending.size > 0) {
+      const ready: Task[] = [];
+      const blocked: Task[] = [];
+
+      for (const task of pending.values()) {
+        if (task.dependsOn.some((dep) => failed.has(dep))) {
+          blocked.push(task);
+        } else if (task.dependsOn.every((dep) => completed.has(dep))) {
+          ready.push(task);
+        }
+      }
+
+      blocked.forEach((task) => {
+        results.set(task.id, dependencyError(`Dependency failed for ${task.id}.`));
+        completed.add(task.id);
+        failed.add(task.id);
+        pending.delete(task.id);
+      });
+
+      if (ready.length === 0) {
+        if (pending.size > 0) {
+          throw new Error('Dependency resolution failed for the agent graph.');
+        }
+        break;
+      }
+
+      const executed = await Promise.all(
+        ready.map(async (task) => ({
+          task,
+          response: await executeWithRetry(task.id, task.run),
+        })),
+      );
+
+      executed.forEach(({ task, response }) => {
+        results.set(task.id, response);
+        completed.add(task.id);
+        if (!response.success) failed.add(task.id);
+        pending.delete(task.id);
+      });
     }
 
-    // Step 2: Execute context collection
-    const contextStep = plan.data.steps.find(s => s.action === 'context_collection');
-    const context = contextStep 
-      ? await ContextExecutorAgent.executeContextCollection(contextStep, alert)
-      : { success: false, error: 'No context step found', timestamp: new Date().toISOString(), agentId: 'orchestrator', executionTime: 0 };
-
-    // Step 3: Perform threat analysis
-    const analysis = context.success && context.data
-      ? await AnalystAgent.performThreatAnalysis(alert, context.data)
-      : { success: false, error: 'Context required for analysis', timestamp: new Date().toISOString(), agentId: 'orchestrator', executionTime: 0 };
-
-    // Step 4: Assess risk
-    const riskAssessment = analysis.success && analysis.data && context.data
-      ? await RiskOrchestratorAgent.performRiskAssessment(alert, analysis.data, context.data)
-      : { success: false, error: 'Analysis required for risk assessment', timestamp: new Date().toISOString(), agentId: 'orchestrator', executionTime: 0 };
-
-    // Step 5: Extract learning insights
-    const learningInsights = analysis.success && analysis.data
-      ? await LearningCuratorAgent.extractLearningInsights(alert, analysis.data, { status: 'completed' })
-      : { success: false, error: 'Analysis required for learning', timestamp: new Date().toISOString(), agentId: 'orchestrator', executionTime: 0 };
-
-    // Step 6: Generate compliance report
-    const complianceReport = analysis.success && analysis.data && riskAssessment.success && riskAssessment.data
-      ? await AuditReporterAgent.generateComplianceReport(alert, analysis.data, riskAssessment.data, 'OGCIO')
-      : { success: false, error: 'Complete analysis required for compliance report', timestamp: new Date().toISOString(), agentId: 'orchestrator', executionTime: 0 };
-
     return {
-      plan,
-      context,
-      analysis,
-      riskAssessment,
-      learningInsights,
-      complianceReport
+      plan: (results.get('planner') as AgentResponse<AnalysisPlan>) ?? dependencyError('Planner did not run.'),
+      context: (results.get('context-executor') as AgentResponse<ContextData>) ?? dependencyError('Context executor did not run.'),
+      analysis: (results.get('analyst') as AgentResponse<ThreatAnalysis>) ?? dependencyError('Analyst did not run.'),
+      riskAssessment: (results.get('risk-orchestrator') as AgentResponse<RiskAssessment>) ?? dependencyError('Risk orchestrator did not run.'),
+      learningInsights: (results.get('learning-curator') as AgentResponse<LearningInsights>) ?? dependencyError('Learning curator did not run.'),
+      complianceReport: (results.get('audit-reporter') as AgentResponse<ComplianceReport>) ?? dependencyError('Audit reporter did not run.'),
     };
   }
 }

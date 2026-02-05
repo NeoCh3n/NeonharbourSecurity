@@ -1,7 +1,9 @@
 import { runtimeClient } from './client';
 import { runtimeStore } from './store';
 import { loadRuntimeSettings, saveRuntimeSettings, type RuntimeConnectionSettings } from './settings';
+import { demoRuntime } from './demo';
 import type { RuntimeState } from './types';
+import type { SecurityAlert } from '../agents';
 
 const bootstrapSettings = loadRuntimeSettings();
 runtimeClient.setSettings(bootstrapSettings);
@@ -26,13 +28,32 @@ export const runtimeService = {
     runtimeClient.setSettings(next);
     saveRuntimeSettings(next);
     runtimeStore.updateConnection({ mode: next.mode });
+    
+    // If endpoint is empty, use demo mode
+    if (!next.endpoint) {
+      runtimeStore.updateConnection({ 
+        status: 'connected', 
+        mode: 'gateway',
+        lastConnectedAt: new Date().toISOString(),
+      });
+      return;
+    }
+    
     await runtimeClient.connect(next);
     await ensureSubscription(runtimeStore.getState());
   },
   disconnect: () => {
     runtimeClient.disconnect();
   },
-  startRun: async (alert: Record<string, unknown>, options?: Record<string, unknown>) => {
+  startRun: async (alert: SecurityAlert, options?: Record<string, unknown>) => {
+    const settings = loadRuntimeSettings();
+    
+    // Use demo runtime if no endpoint configured or explicitly in demo mode
+    if (!settings.endpoint || settings.mode === 'gateway' && !runtimeClient.isConnected()) {
+      await demoRuntime.startRun(alert);
+      return { run_id: 'demo-run' };
+    }
+    
     const result = await runtimeClient.startRun(alert, options);
     if (result?.run_id) {
       runtimeStore.setActiveRun(result.run_id);
@@ -71,7 +92,13 @@ export const runtimeService = {
     }
     return result;
   },
-  stopRun: (runId: string) => runtimeClient.stopRun(runId),
+  stopRun: (runId: string) => {
+    if (demoRuntime.isRunning()) {
+      demoRuntime.stopRun();
+      return Promise.resolve();
+    }
+    return runtimeClient.stopRun(runId);
+  },
   respondToApproval: (requestId: string, decision: 'approved' | 'rejected', comment?: string) =>
     runtimeClient.respondToServerRequest(requestId, decision, comment),
   executeAgent: (

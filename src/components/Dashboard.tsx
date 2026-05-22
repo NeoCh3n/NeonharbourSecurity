@@ -9,13 +9,16 @@ import {
   Clock, 
   TrendingUp, 
   Activity,
+  Database,
   Target,
   Zap,
   FileText,
   Timer,
-  Gavel
+  Gavel,
+  Server
 } from 'lucide-react';
 import { useRuntimeStore } from '../services/runtime';
+import { aiStackProfile } from '../services/aiStack';
 import { features } from '../config/environment';
 
 interface DashboardProps {
@@ -206,6 +209,57 @@ export function Dashboard({ onActiveAlertsClick }: DashboardProps) {
           </Card>
         ))}
       </div>
+
+      <Card className="bg-slate-800/50 backdrop-blur-sm border-slate-700">
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between text-white">
+            <div className="flex items-center space-x-2">
+              <Database className="h-5 w-5 text-cyan-400" />
+              <span>{aiStackProfile.name}</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline" className="border-blue-600 text-blue-300">
+                {aiStackProfile.llmFramework}
+              </Badge>
+              <Badge variant="outline" className="border-cyan-600 text-cyan-300">
+                {aiStackProfile.vectorDb}
+              </Badge>
+            </div>
+          </CardTitle>
+          <CardDescription className="text-slate-300">
+            {aiStackProfile.primaryUseCase}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            {aiStackProfile.capabilities.map((capability) => (
+              <div key={capability.id} className="rounded-lg border border-slate-700/70 bg-slate-900/35 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center space-x-2">
+                    {capability.id === 'monitoring' ? (
+                      <Activity className="h-4 w-4 text-green-400" />
+                    ) : capability.id === 'devsecops' ? (
+                      <Server className="h-4 w-4 text-orange-400" />
+                    ) : (
+                      <Database className="h-4 w-4 text-cyan-400" />
+                    )}
+                    <span className="text-sm font-medium text-slate-200">{capability.name}</span>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className={capability.status === 'ready'
+                      ? 'border-green-600 text-green-400'
+                      : 'border-yellow-600 text-yellow-400'}
+                  >
+                    {capability.status === 'ready' ? 'Ready' : 'Planned'}
+                  </Badge>
+                </div>
+                <p className="mt-2 text-xs text-slate-400">{capability.description}</p>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Multi-Agent Pipeline Status */}

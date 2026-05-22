@@ -21,6 +21,7 @@ import {
   Clock
 } from 'lucide-react';
 import { loadRuntimeSettings, runtimeService, useRuntimeStore } from '../services/runtime';
+import { aiStackProfile } from '../services/aiStack';
 import { features, isDevelopment } from '../config/environment';
 
 interface SettingsProps {
@@ -328,6 +329,42 @@ export function Settings({ onBack, selectedSources }: SettingsProps) {
                   <Badge variant="outline" className={features.multiAgentPipeline ? 'border-green-600 text-green-400' : 'border-slate-600 text-slate-400'}>
                     {features.multiAgentPipeline ? 'Enabled' : 'Disabled'}
                   </Badge>
+                </div>
+                <div className="rounded-lg border border-blue-700/40 bg-blue-950/20 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <Label className="text-slate-200">{aiStackProfile.name}</Label>
+                      <p className="text-sm text-slate-400">
+                        {aiStackProfile.primaryUseCase}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="outline" className="border-blue-600 text-blue-300">
+                        {aiStackProfile.llmFramework}
+                      </Badge>
+                      <Badge variant="outline" className="border-cyan-600 text-cyan-300">
+                        {aiStackProfile.vectorDb}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {aiStackProfile.capabilities.map((capability) => (
+                      <div key={capability.id} className="rounded border border-slate-700/70 bg-slate-900/40 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-medium text-slate-200">{capability.name}</p>
+                          <Badge
+                            variant="outline"
+                            className={capability.status === 'ready'
+                              ? 'border-green-600 text-green-400'
+                              : 'border-yellow-600 text-yellow-400'}
+                          >
+                            {capability.status === 'ready' ? 'Ready' : 'Planned'}
+                          </Badge>
+                        </div>
+                        <p className="mt-2 text-xs text-slate-400">{capability.implementation}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="confidence" className="text-slate-300">Confidence Threshold (%)</Label>

@@ -1,0 +1,11 @@
+{
+  "alert_id": "NH-001",
+  "source": "SIEM",
+  "severity": "high",
+  "host": "WIN-ACCT-07",
+  "user": "finance.user",
+  "event": "Suspicious PowerShell execution",
+  "command": "powershell.exe -nop -w hidden -enc SQBFAFgA",
+  "src_ip": "10.10.8.23",
+  "timestamp": "2026-06-03T10:30:00Z"
+}
